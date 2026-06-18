@@ -1,0 +1,687 @@
+---
+# Infrastructure CMDB
+# ssh_auth: "env"  → 用 .env service account（rp-main 等系統帳號）
+# ssh_auth: "ad"   → 用 AD Session（tools/auth.py login()）
+
+data_flow:
+  - external_client
+  - rp-main
+  - k8s-ingress
+  - k8s-pod
+
+nodes:
+  # ── P660 MIS/Infra ────────────────────────────────────
+  rp-main:
+    label: rp-main
+    role: reverse_proxy
+    ip: "10.11.9.2"
+    ssh_auth: env
+    ssh_user_env: RP_USER
+    ssh_pass_env: RP_PASS
+    key_paths:
+      nginx_config: /etc/nginx/nginx.conf
+      nginx_sites: /etc/nginx/sites-available/
+      nginx_access_log: /var/log/nginx/access.log
+      nginx_error_log: /var/log/nginx/error.log
+
+  # ── K8s ───────────────────────────────────────────────
+  k8s-ingress:
+    label: k8s-ingress
+    role: ingress_controller
+    ip: "10.11.1.236"
+    ssh_auth: null
+    kubeconfig: "~/.kube/prod-config"
+    key_paths:
+      ingress_namespace: ingress-nginx
+      ingress_deploy: ingress-nginx-controller
+
+  k8s-pod:
+    label: k8s-pod
+    role: application
+    ip: null
+
+  # ── AD 登入的服務主機 ─────────────────────────────────
+  crm:
+    label: crm
+    role: application
+    ip: "10.11.1.159"
+    ssh_auth: ad
+    team: P650
+
+  okr:
+    label: okr
+    role: application
+    ip: "10.11.1.163"
+    ssh_auth: ad
+    team: P680
+
+  recruitment:
+    label: recruitment
+    role: application
+    ip: "10.11.1.167"
+    ssh_auth: ad
+    team: P680
+
+  gss:
+    label: gss
+    role: application
+    ip: "10.11.1.171"
+    ssh_auth: ad
+    team: P680
+
+  punch-in:
+    label: punch-in
+    role: application
+    ip: "10.11.1.172"
+    ssh_auth: ad
+    team: P680
+
+  pms:
+    label: pms
+    role: application
+    ip: "10.11.1.175"
+    ssh_auth: ad
+    team: P680
+
+  legal:
+    label: legal
+    role: application
+    ip: "10.11.1.176"
+    ssh_auth: ad
+    team: P680
+
+  online-exam:
+    label: online-exam
+    role: application
+    ip: "10.11.1.181"
+    ssh_auth: ad
+    team: P680
+
+  harbor:
+    label: harbor
+    role: registry
+    ip: "10.11.1.196"
+    ssh_auth: ad
+    team: P660
+
+  # ── SMTP ──────────────────────────────────────────────
+  smtp-server:
+    label: smtp-server
+    role: mail_relay
+    ip: "10.11.1.125"
+    ssh_auth: env
+    ssh_user_env: SMTP_USER
+    ssh_pass_env: SMTP_PASS
+    key_paths:
+      mail_log: /var/log/mail.log
+      mail_log_alt: /var/log/maillog
+
+  ubiq-srm:
+    label: ubiq-srm
+    role: application
+    ip: "10.11.1.114"
+    ssh_auth: ad
+    team: P670
+
+  # ── P680 DB ───────────────────────────────────────────
+  cloud-db:
+    label: cloud-db
+    role: database
+    ip: "10.11.1.238"
+    ssh_auth: env
+    ssh_user_env: SMTP_USER
+    ssh_pass_env: SMTP_PASS
+    team: P680
+
+  cloudtest-db:
+    label: cloudtest-db
+    role: database
+    ip: "10.11.1.239"
+    ssh_auth: env
+    ssh_user_env: SMTP_USER
+    ssh_pass_env: SMTP_PASS
+    team: P680
+
+
+# ── Dashboard 重點 Server 清單 ────────────────────────────
+# ad_dc: true  → 顯示完整 AD 健康資料（鎖定/登入失敗/密碼到期）
+# zabbix:      → Zabbix 主機名稱（待確認後填入，null 表示不查）
+# wazuh:       → Wazuh agent 名稱
+dashboard_servers:
+  # ── P660 基礎設施 ──────────────────────────────────────
+  - label: UTI-DC01
+    ip: "10.11.1.121"
+    team: P660-Infra
+    desc: AD Domain Controller
+    zabbix: UTI-DC01-Customized
+    wazuh: UTI-DC01
+    ad_dc: true
+
+  - label: SMTP
+    ip: "10.11.1.125"
+    team: P660-Infra
+    desc: Mail Relay
+    zabbix: null
+    wazuh: smtp
+
+  - label: harbor
+    ip: "10.11.1.192"
+    team: P660-Infra
+    desc: Container Registry
+    zabbix: null
+    wazuh: harbor
+
+  # ── P650 ERP ───────────────────────────────────────────
+  - label: T100ERP
+    ip: "10.11.1.100"
+    team: P650-ERP
+    desc: T100 ERP 主機
+    zabbix: null
+    wazuh: T100ERP
+
+  - label: T100rpt
+    ip: "10.11.1.101"
+    team: P650-ERP
+    desc: T100 報表主機
+    zabbix: null
+    wazuh: T100rpt
+
+  - label: BPM
+    ip: "10.11.1.110"
+    team: P650-ERP
+    desc: BPM 系統
+    zabbix: BPM
+    wazuh: BPM
+
+  - label: BPM-Test
+    ip: "10.11.1.109"
+    team: P650-ERP
+    desc: BPM 測試機
+    zabbix: BPM-Test
+    wazuh: BPMTEST
+
+  # ── P670 MES ───────────────────────────────────────────
+  - label: WMSv5
+    ip: "10.11.1.105"
+    team: P670-MES
+    desc: 倉儲系統
+    zabbix: null
+    wazuh: WMSv5
+
+
+  # ── P680 Cloud ─────────────────────────────────────────
+  - label: CRM
+    ip: "10.11.1.159"
+    team: P680-Cloud
+    desc: CRM 系統
+    zabbix: null
+    wazuh: crm
+
+  - label: cloud-db
+    ip: "10.11.1.238"
+    team: P680-Cloud
+    desc: 生產資料庫
+    zabbix: null
+    wazuh: cloud-db
+
+  - label: punch-in
+    ip: "10.11.1.172"
+    team: P680-Cloud
+    desc: 打卡系統
+    zabbix: null
+    wazuh: punch-in
+
+  - label: k8s-prod-master
+    ip: "10.11.1.235"
+    team: P680-Cloud
+    desc: K8s 生產 Master
+    zabbix: null
+    wazuh: p680-prod-k8s-master
+
+  - label: k8s-prod-client
+    ip: "10.11.1.236"
+    team: P680-Cloud
+    desc: K8s 生產 Client
+    zabbix: P680_prod_k8s_client
+    wazuh: p680-prod-k8s-client
+
+  - label: cloudtest-db
+    ip: "10.11.1.239"
+    team: P680-Cloud
+    desc: 測試資料庫
+    zabbix: 10.11.1.239_cloudtest-db
+    wazuh: cloudtest-db
+
+  - label: snquery
+    ip: "10.11.1.160"
+    team: P680-Cloud
+    desc: 序號查詢
+    zabbix: snquery-new.ruggon.com
+    wazuh: snquery-new
+
+  - label: dev-frontend-web
+    ip: "10.11.1.185"
+    team: P680-Cloud
+    desc: 開發前端 Web
+    zabbix: dev-frontend-web
+    wazuh: dev-frontend-web
+
+  - label: dev-frontend-api
+    ip: "10.11.1.186"
+    team: P680-Cloud
+    desc: 開發前端 API
+    zabbix: dev-frontend-api
+    wazuh: dev-frontend-api
+
+  - label: dev-mqtt
+    ip: "10.11.1.187"
+    team: P680-Cloud
+    desc: 開發 MQTT
+    zabbix: dev-mqtt
+    wazuh: dev-mqtt
+
+  - label: dev-device-api
+    ip: "10.11.1.188"
+    team: P680-Cloud
+    desc: 開發 Device API
+    zabbix: dev-device-api
+    wazuh: dev-device-api
+
+  - label: partner_zone
+    ip: "10.11.1.194"
+    team: P680-Cloud
+    desc: 合作夥伴區域
+    zabbix: partner_zone
+    wazuh: partnerzone
+
+  - label: dev-mysql
+    ip: "10.11.1.184"
+    team: P680-Cloud
+    desc: 開發 MySQL
+    zabbix: dev-mysql
+
+  - label: P680-k8s-test-master
+    ip: "10.11.1.232"
+    team: P680-Cloud
+    desc: K8s 測試 Master
+    zabbix: k8s_master_P740
+    wazuh: k8s-master
+
+  - label: P680-k8s-test-client
+    ip: "10.11.1.233"
+    team: P680-Cloud
+    desc: K8s 測試 Client
+    zabbix: k8s_client_P740
+    wazuh: k8s-client
+
+  # ── P650 ERP (補齊) ────────────────────────────────────
+  - label: EKB
+    ip: "10.11.1.102"
+    team: P650-ERP
+    desc: EKB 系統
+    zabbix: EKB
+    wazuh: EKB
+
+  - label: DigiwinPLM
+    ip: "10.11.1.103"
+    team: P650-ERP
+    desc: Digiwin PLM
+    zabbix: DigiwinPLM
+    wazuh: DigiwinPLM
+
+  - label: BI
+    ip: "10.11.1.165"
+    team: P650-ERP
+    desc: BI 系統
+    zabbix: BI
+    wazuh: BI
+
+  - label: BI-Clone
+    ip: "10.11.1.164"
+    team: P650-ERP
+    desc: BI 測試機
+    zabbix: BI-clone
+    wazuh: BI-Clone
+
+  - label: DigiwinPLM-Test
+    ip: "10.11.1.249"
+    team: P650-ERP
+    desc: Digiwin PLM 測試機
+    zabbix: DigiWinPLM_test
+    wazuh: DigiwinPLM-TEST
+
+  - label: guardserver
+    ip: "10.11.1.107"
+    team: P650-ERP
+    desc: ERP 授權主機
+    zabbix: Guard service
+
+  - label: FedEx-wedium
+    ip: "10.11.1.111"
+    team: P650-ERP
+    desc: FedEx 中介
+    zabbix: FedEx-wedium
+
+  # ── P670 MES (補齊) ────────────────────────────────────
+  - label: ubiq-srm
+    ip: "10.11.1.114"
+    team: P670-MES
+    desc: SRM 系統
+    zabbix: 10.11.1.114_ilc-srm-test_SRM
+    wazuh: ubiq-srm
+
+  - label: shopfloor-sql
+    ip: "10.14.1.5"
+    team: P670-MES
+    desc: 中和 Shopfloor DB
+    zabbix: 10.14.1.5_shopfloor-sql_MESDB
+    wazuh: shopfloor-sql
+
+  - label: shopfloor-web
+    ip: "10.14.1.6"
+    team: P670-MES
+    desc: 中和 Shopfloor Web/eSOP
+    zabbix: 10.14.1.6_shopfloor-web_eSOP
+    wazuh: shopfloor-web
+
+  - label: mes01
+    ip: "10.14.1.11"
+    team: P670-MES
+    desc: 中和 MES01 MongoDB
+    zabbix: 10.14.1.11_mes01_MongoDB
+    wazuh: mes01
+
+  # ── P660 Infra (補齊) ──────────────────────────────────
+  - label: ota-qa
+    ip: "10.11.1.4"
+    team: P660-Infra
+    desc: OTA QA 主機
+    zabbix: OTA-QA
+    wazuh: ota-qa
+
+  - label: esxi01
+    ip: "10.11.1.11"
+    team: P660-Infra
+    desc: ESXi 主機 01
+    zabbix: ESXi01
+
+  - label: esxi02
+    ip: "10.11.1.13"
+    team: P660-Infra
+    desc: ESXi 主機 02
+    zabbix: ESXi02
+
+  - label: esxi03
+    ip: "10.11.1.16"
+    team: P660-Infra
+    desc: ESXi 主機 03
+    zabbix: ESXi03
+
+  - label: esxi04
+    ip: "10.11.1.18"
+    team: P660-Infra
+    desc: ESXi 主機 04
+    zabbix: ESXi04
+
+  - label: esxi05
+    ip: "10.11.1.22"
+    team: P660-Infra
+    desc: ESXi 主機 05
+    zabbix: ESXi05
+
+  - label: MailBase
+    ip: "10.11.1.60"
+    team: P660-Infra
+    desc: Exchange Mail Server
+    zabbix: mailbase
+    wazuh: ExchangeMailServerPOC
+
+  - label: RGC-DC
+    ip: "10.11.1.123"
+    team: P660-Infra
+    desc: RGC Domain Controller
+    zabbix: RGC-DC
+    wazuh: RGC-DC
+
+  - label: UP-HCB
+    ip: "10.11.1.134"
+    team: P660-Infra
+    desc: Humly 會議室系統
+    zabbix: Humly
+    wazuh: UP-HCB
+
+  - label: UTI-OSCE-NEW
+    ip: "10.11.1.143"
+    team: P660-Infra
+    desc: 趨勢防毒
+    zabbix: UTI-OSCE-New
+    wazuh: UTI-OSCE-NEW
+
+  - label: UTI-DHCP
+    ip: "10.11.1.146"
+    team: P660-Infra
+    desc: DHCP 伺服器
+    zabbix: UTI-DHCP
+    wazuh: UTI-DHCP
+
+  - label: UTI-PS
+    ip: "10.11.1.161"
+    team: P660-Infra
+    desc: Print Server
+    zabbix: UTI-PS
+    wazuh: UTI-PS
+
+  - label: Nessus
+    ip: "10.11.1.198"
+    team: P660-Infra
+    desc: 漏洞掃描
+    zabbix: Nessus-new
+
+  - label: RDFS
+    ip: "10.11.1.223"
+    team: P660-Infra
+    desc: Remote Desktop / File Server
+    zabbix: UTI-RDFS
+    wazuh: UTI-RDFS
+
+  - label: k8s-minio
+    ip: "10.11.1.231"
+    team: P660-Infra
+    desc: MinIO 物件儲存
+    zabbix: k8s-minio
+    wazuh: k8s-minio
+
+  - label: WinMatrix
+    ip: "10.11.1.240"
+    team: P660-Infra
+    desc: 資產管理
+    zabbix: null
+    wazuh: WinMatrix
+
+  - label: UTI-NAS
+    ip: "10.11.8.1"
+    team: P660-Infra
+    desc: 主 NAS
+    zabbix: cellar-primary Synology RS1221
+    synology: true
+
+  - label: Cloud-NAS
+    ip: "10.11.8.5"
+    team: P660-Infra
+    desc: Cloud Team NAS
+    zabbix: cloud-team-nas Synology DS220
+
+  - label: UTI-ZH-NAS
+    ip: "10.14.1.10"
+    team: P660-Infra
+    desc: 中和 NAS
+    synology: true
+
+  - label: UTI-ZH-DHCP
+    ip: "10.14.1.1"
+    team: P660-Infra
+    desc: 中和 DHCP
+    zabbix: null
+    wazuh: UTI-ZH-DHCP
+
+  - label: fs2
+    ip: "10.14.1.81"
+    team: P660-Infra
+    desc: 中和 File Server 2
+    zabbix: null
+    wazuh: fs2
+
+  - label: UTI-ZH-FS
+    ip: "10.14.1.97"
+    team: P660-Infra
+    desc: 中和 File Server
+    zabbix: null
+    wazuh: UTI-ZH-FS
+
+  - label: UTI-DC03
+    ip: "10.14.1.122"
+    team: P660-Infra
+    desc: 中和 Domain Controller
+    zabbix: UTI-DC03-Customized
+    wazuh: UTI-DC03
+
+  - label: RGC-DC2
+    ip: "10.14.1.124"
+    team: P660-Infra
+    desc: 中和 RGC DC2
+    zabbix: RGC-DC2-Customized
+    wazuh: RGC-DC2
+
+  - label: ME4024
+    ip: "10.200.202.10"
+    team: P660-Infra
+    desc: Dell ME4024 儲存
+
+  - label: ME5024
+    ip: "10.200.202.12"
+    team: P660-Infra
+    desc: Dell ME5024 儲存
+
+  - label: ME5224-1
+    ip: "10.200.202.14"
+    team: P660-Infra
+    desc: Dell ME5224 儲存 #1
+
+  - label: ME5224-2
+    ip: "10.200.202.16"
+    team: P660-Infra
+    desc: Dell ME5224 儲存 #2
+
+  - label: S01-DCS_Backup
+    ip: "10.11.1.227"
+    team: P660-Infra
+    desc: S01 DCS 備援
+    zabbix: S01-DCS_backup
+
+  - label: PPDM
+    ip: "10.11.1.32"
+    team: P660-Infra
+    desc: Dell PPDM 備份主機
+    ppdm: true
+
+  - label: 環控主機
+    ip: "10.11.1.64"
+    team: P660-Infra
+    desc: 機房環控
+
+  # ── P700 RD ────────────────────────────────────────────
+  - label: S01-DCS
+    ip: "10.11.1.222"
+    team: P700-RD
+    desc: DCS 主機 01
+    zabbix: S01-DCS_new
+    wazuh: s01-dcs
+
+  - label: S02-DCS
+    ip: "10.11.1.221"
+    team: P700-RD
+    desc: DCS 主機 02
+    zabbix: S02-DCS
+
+  - label: S03-DCS
+    ip: "10.11.1.224"
+    team: P700-RD
+    desc: DCS 主機 03
+    zabbix: S03-DCS
+    wazuh: s03-dcs
+
+  - label: S04-DCS
+    ip: "10.11.1.228"
+    team: P700-RD
+    desc: DCS 主機 04
+    zabbix: S04-DCS
+
+  - label: S05-DCS
+    ip: "10.11.1.229"
+    team: P700-RD
+    desc: DCS 主機 05
+    zabbix: S05-DCS
+    wazuh: s05-dcs
+
+  - label: RD-BuildServer1
+    ip: "10.11.1.225"
+    team: P700-RD
+    desc: RD Build Server
+    zabbix: RD-BuildServer1
+    wazuh: rd-buildserver1
+
+  - label: P700-RP
+    ip: "10.11.1.230"
+    team: P700-RD
+    desc: P700 Reverse Proxy
+    zabbix: p700-reverse-proxy
+    wazuh: p700-reverse-proxy
+
+  - label: k8s-master-P740
+    ip: "10.11.1.234"
+    team: P700-RD
+    desc: K8s Master P740
+    zabbix: k8s-master2
+    wazuh: k8s-master2
+
+  - label: P700-signbox
+    ip: "10.11.1.237"
+    team: P700-RD
+    desc: Sign Box
+
+  # ── PJ10 HR ────────────────────────────────────────────
+  - label: EHRMS
+    ip: "10.11.1.130"
+    team: PJ10-HR
+    desc: 人資系統
+    zabbix: EHRMS
+    wazuh: EHRMS
+
+  # ── PJ20 總務 ──────────────────────────────────────────
+  - label: BELLSRV-TEST
+    ip: "10.11.1.220"
+    team: PJ20-總務
+    desc: 卡鐘系統
+    zabbix: BELLSRV-NEW
+
+  # ── PE20 GSBU ──────────────────────────────────────────
+  - label: TAK-Server
+    ip: "10.11.1.241"
+    team: PE20-GSBU
+    desc: TAK 伺服器
+    zabbix: null
+    wazuh: TAK-Server
+
+  - label: aiot-poc
+    ip: "10.11.1.242"
+    team: PE20-GSBU
+    desc: AIoT POC
+    zabbix: null
+    wazuh: aiot-poc
+
+external_services:
+  recruitment:
+    name: recruitment
+    url: "https://recruitment.ubiqconn.com"
+    expected_status: [200, 301, 302]
+    ingress_host_header: recruitment.ubiqconn.com
