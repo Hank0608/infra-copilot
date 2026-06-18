@@ -1,0 +1,14 @@
+# 既有 tools/*.py 用到的套件（版本鎖定自目前開發環境，2026-06-18）
+python-dotenv==1.2.1
+Flask==3.1.3
+keyring==25.7.0
+ldap3==2.9.1
+openpyxl==3.1.5
+paramiko==4.0.0
+pyvmomi==9.0.0.0
+PyYAML==6.0.3
+dnspython==2.7.0
+
+# Phase 2 (MCP server) 會用到，先鎖定版本
+mcp==1.28.0
+anthropic==0.109.2
