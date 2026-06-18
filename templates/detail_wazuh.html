@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ label }} — {{ zh }}</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<style>
+  :root {
+    --bg:     #0d1117;
+    --card:   #161b22;
+    --border: #30363d;
+    --text:   #c9d1d9;
+    --muted:  #b0bac5;
+    --ok:     #3fb950;
+    --warn:   #d29922;
+    --err:    #f85149;
+    --accent: #58a6ff;
+  }
+  body         { background: var(--bg) !important; color: var(--text) !important; font-size: .875rem; }
+  .card        { background: var(--card) !important; color: var(--text) !important; }
+  .navbar-dark { background: #010409 !important; border-bottom: 1px solid var(--border); }
+  /* .card overridden above with !important */
+  .c-ok    { color: var(--ok); }
+  .c-warn  { color: var(--warn); }
+  .c-err   { color: var(--err); }
+  .c-muted { color: var(--muted); }
+  .c-accent{ color: var(--accent); }
+
+  /* tables */
+  table       { border-collapse: separate; border-spacing: 0; width: 100%; }
+  thead th    { background: #010409; color: var(--muted); font-size: .7rem;
+                text-transform: uppercase; letter-spacing: .06em;
+                padding: .4rem .75rem; border-bottom: 1px solid var(--border);
+                position: sticky; top: 0; z-index: 5; white-space: nowrap; }
+  tbody tr    { border-bottom: 1px solid var(--border); cursor: pointer; }
+  tbody tr:hover { background: #1c2128; }
+  tbody tr.open  { background: #1c2128; }
+  tbody td    { padding: .4rem .75rem; vertical-align: middle; }
+  .raw-row td { padding: 0; background: #0d1117; border-bottom: 1px solid var(--border); }
+  .raw-box    { padding: .5rem 1rem; }
+  .raw-log    { font-family: monospace; font-size: .72rem; color: var(--muted);
+                white-space: pre-wrap; word-break: break-all; margin: 0;
+                max-height: 180px; overflow-y: auto; }
+
+  /* step card */
+  .step-row   { display: flex; gap: .75rem; padding: .4rem 0;
+                border-bottom: 1px solid #21262d; }
+  .step-row:last-child { border: none; }
+  .step-num   { min-width: 1.6rem; color: var(--accent); font-weight: 600; }
+  .step-title { color: var(--muted); min-width: 90px; font-size: .78rem; }
+  .step-body  { font-family: monospace; font-size: .78rem; color: var(--text); }
+
+  /* bar chart */
+  .bar-row    { display: flex; align-items: center; gap: .5rem; margin: .15rem 0;
+                font-size: .75rem; }
+  .bar-label  { color: var(--muted); min-width: 80px; text-align: right; }
+  .bar-fill   { background: #1f4b8a; height: 14px; border-radius: 2px;
+                transition: width .3s; }
+  .bar-count  { color: var(--muted); min-width: 40px; }
+
+  .field-tag  { display: inline-block; font-size: .7rem; padding: .1rem .35rem;
+                border-radius: 3px; background: #21262d; border: 1px solid var(--border);
+                margin: .1rem; }
+  .field-key  { color: var(--muted); }
+  .badge-rule { font-size: .7rem; background: #21262d; color: var(--muted);
+                border: 1px solid var(--border); padding: .15rem .5rem; border-radius: 4px; }
+  a.back      { color: var(--accent); font-size: .85rem; text-decoration: none; }
+  a.back:hover{ color: #79c0ff; }
+  .section-title { font-size: .7rem; text-transform: uppercase; letter-spacing: .07em;
+                   color: var(--muted); margin-bottom: .5rem; }
+</style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark py-2">
+  <div class="container-fluid px-4">
+    <div class="d-flex align-items-center gap-3">
+      <a href="/" class="back">← Dashboard</a>
+      <a href="/detail/wazuh/agent?agent={{ agent }}&label={{ label }}&hours={{ hours }}" class="back">← 全覽</a>
+      <span class="navbar-brand mb-0 fw-semibold">{{ label }} — {{ zh }}</span>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <span class="badge-rule">rule {{ rule_id }} · {{ agent }}</span>
+      {% for h in [6, 24, 72] %}
+        <a href="?agent={{ agent }}&rule={{ rule_id }}&label={{ label }}&hours={{ h }}"
+           class="btn btn-sm btn-outline-secondary py-0 {{ 'active' if hours == h else '' }}">{{ h }}h</a>
+      {% endfor %}
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid px-4 py-3">
+
+  {% if error %}
+  <div class="alert alert-danger py-2 small">查詢失敗：{{ error }}</div>
+  {% endif %}
+
+  {% set a = analysis %}
+
+  <!-- ── 摘要列 ──────────────────────────────────────────── -->
+  <div class="row g-3 mb-3">
+
+    <!-- 摘要說明 -->
+    <div class="col-lg-5">
+      <div class="card h-100 px-3 py-2">
+        <div class="section-title">問題說明</div>
+        <div style="font-size:.85rem">
+          {% if summary %}{{ summary }}{% else %}{{ action }}{% endif %}
+        </div>
+        <div class="mt-2 c-muted" style="font-size:.75rem">
+          共 <strong class="{{ 'c-err' if a.total >= 100 else 'c-warn' }}">{{ a.total }}</strong> 筆
+          （近 {{ hours }}h）
+        </div>
+      </div>
+    </div>
+
+    <!-- 時間分佈 -->
+    <div class="col-lg-4">
+      <div class="card h-100 px-3 py-2" style="overflow-y:auto;max-height:220px">
+        <div class="section-title">每小時分佈</div>
+        {% if a.by_hour %}
+          {% set max_c = a.by_hour | map(attribute='count') | max %}
+          {% for row in a.by_hour %}
+          <div class="bar-row">
+            <span class="bar-label">{{ row.hour[5:] }}</span>
+            <div class="bar-fill" style="width:{{ [1, (row.count / max_c * 160) | int] | max }}px"></div>
+            <span class="bar-count">{{ row.count }}</span>
+          </div>
+          {% endfor %}
+        {% else %}
+          <span class="c-muted small">無資料</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- 建議步驟 -->
+    <div class="col-lg-3">
+      <div class="card h-100 px-3 py-2">
+        <div class="section-title">診斷步驟</div>
+        {% if steps %}
+          {% for title, body in steps %}
+          <div class="step-row">
+            <span class="step-num">{{ loop.index }}.</span>
+            <span class="step-title">{{ title }}</span>
+            <span class="step-body">{{ body }}</span>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="c-muted small">{{ action }}</div>
+        {% endif %}
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── 次分組（Event ID / Source） ──────────────────────── -->
+  <div class="card px-3 py-2 mb-3">
+    {% if a.by_event_id %}
+      <!-- Windows: Event ID 次分組 -->
+      <div class="section-title">Event ID 次分組（點擊查看全部紀錄）</div>
+      <table>
+        <thead><tr>
+          <th>Event ID</th><th>說明</th><th style="text-align:right">次數</th><th>最後發生</th>
+        </tr></thead>
+        <tbody>
+        {% for row in a.by_event_id %}
+        <tr onclick="window.location='/detail/wazuh/event?agent={{ agent }}&rule={{ rule_id }}&event_id={{ row.event_id }}&label={{ label }}&hours={{ hours }}'" style="cursor:pointer">
+          <td class="fw-semibold c-accent" style="white-space:nowrap">{{ row.event_id }}</td>
+          <td style="font-size:.82rem">{{ row.explain or '—' }}</td>
+          <td style="text-align:right">
+            <span class="{{ 'c-err' if row.count >= 50 else ('c-warn' if row.count >= 10 else 'c-muted') }}">
+              {{ row.count }}
+            </span>
+          </td>
+          <td class="c-muted" style="font-size:.75rem;white-space:nowrap">{{ row.latest[5:16] }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% elif a.by_source %}
+      <!-- Linux: 來源程式次分組 -->
+      <div class="section-title">來源程式次分組</div>
+      <table>
+        <thead><tr>
+          <th style="width:1.2rem"></th><th>來源</th><th style="text-align:right">次數</th><th>最後發生</th>
+        </tr></thead>
+        <tbody>
+        {% for row in a.by_source %}
+        {% set sid = 'src-' ~ loop.index %}
+        <tr onclick="toggleSrc('{{ sid }}', {{ row.source | tojson }})" style="cursor:pointer" id="row-{{ sid }}">
+          <td class="c-muted text-center" id="chev-{{ sid }}">›</td>
+          <td class="fw-semibold" style="font-size:.82rem">{{ row.source }}</td>
+          <td style="text-align:right">
+            <span class="{{ 'c-err' if row.count >= 50 else ('c-warn' if row.count >= 10 else 'c-muted') }}">
+              {{ row.count }}
+            </span>
+          </td>
+          <td class="c-muted" style="font-size:.75rem;white-space:nowrap">{{ row.latest[5:16] }}</td>
+        </tr>
+        <tr style="display:none" id="{{ sid }}-detail">
+          <td colspan="4" style="padding:0;background:#0d1117;border-bottom:1px solid var(--border)">
+            <div class="raw-box" id="{{ sid }}-body"></div>
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="c-muted small">無次分組資料（Linux SCA / 合規掃描事件不含來源欄位）</div>
+    {% endif %}
+  </div>
+
+  <!-- ── 最近事件（30 筆，可展開） ──────────────────────────── -->
+  <div class="card px-3 py-2">
+    <div class="section-title mb-2">最近 {{ a.recent | length }} 筆事件（點擊展開）</div>
+    {% if not a.recent %}
+      <div class="c-muted small">無資料</div>
+    {% else %}
+    <table>
+      <thead>
+        <tr>
+          <th style="width:1.2rem"></th>
+          <th style="width:140px">時間</th>
+          <th>描述</th>
+          <th>關鍵欄位</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for ev in a.recent %}
+      {% set eid = loop.index %}
+      <tr onclick="toggle({{ eid }})" id="row-{{ eid }}">
+        <td class="c-muted text-center" id="chev-{{ eid }}">›</td>
+        <td class="c-muted" style="font-size:.78rem;white-space:nowrap">{{ ev.ts }}</td>
+        <td style="font-size:.82rem">{{ ev.description }}</td>
+        <td>
+          {% for k, v in ev.fields.items() %}
+          <span class="field-tag"><span class="field-key">{{ k }}:</span> {{ v[:40] }}</span>
+          {% endfor %}
+        </td>
+      </tr>
+      <tr style="display:none" id="raw-{{ eid }}">
+        <td colspan="4" style="padding:0;background:#0d1117;border-bottom:1px solid var(--border)">
+          <div class="raw-box">
+            {% if ev.fields %}
+            <div class="mb-2">
+              {% for k, v in ev.fields.items() %}
+              <div style="font-size:.8rem"><span class="c-muted">{{ k }}:</span> {{ v }}</div>
+              {% endfor %}
+            </div>
+            {% endif %}
+            {% if ev.full_log %}
+            <div class="c-muted" style="font-size:.68rem;margin-bottom:.25rem">Full Log</div>
+            <pre class="raw-log">{{ ev.full_log }}</pre>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+</div>
+
+<script>
+/* ── recent events data ── */
+const RECENT = {{ a.recent | tojson | safe }};
+
+/* ── recent event row (expand/collapse) ── */
+function toggle(id) {
+  const raw  = document.getElementById('raw-'  + id);
+  const chev = document.getElementById('chev-' + id);
+  const row  = document.getElementById('row-'  + id);
+  const open = raw.style.display !== 'none';
+  raw.style.display = open ? 'none' : 'table-row';
+  chev.textContent  = open ? '›' : '⌄';
+  row.classList.toggle('open', !open);
+}
+
+/* ── render mini event table ── */
+function _eventsHtml(evs) {
+  if (!evs.length) return '<div style="font-size:.75rem;color:#b0bac5;padding:.25rem 0">（近期無匹配事件）</div>';
+  const rows = evs.slice(0, 10).map(ev => {
+    const tags = Object.entries(ev.fields || {})
+      .filter(([k]) => k !== 'Source' && k !== 'Channel')
+      .map(([k,v]) => `<span class="field-tag"><span class="field-key">${k}:</span> ${String(v).slice(0,40)}</span>`)
+      .join('');
+    return `<tr>
+      <td class="c-muted" style="font-size:.72rem;white-space:nowrap">${ev.ts.slice(5)}</td>
+      <td style="font-size:.75rem">${ev.description}</td>
+      <td>${tags}</td>
+    </tr>`;
+  }).join('');
+  const more = evs.length > 10 ? `<div class="c-muted" style="font-size:.72rem;padding:.2rem 0">…共 ${evs.length} 筆，顯示前 10</div>` : '';
+  return `<table style="margin-top:.4rem"><thead><tr>
+    <th style="font-size:.65rem">時間</th><th style="font-size:.65rem">描述</th><th style="font-size:.65rem">欄位</th>
+  </tr></thead><tbody>${rows}</tbody></table>${more}`;
+}
+
+/* ── Source table rows ── */
+function toggleSrc(id, srcName) {
+  const nowOpen = _expandToggle(id + '-detail', 'chev-' + id, 'row-' + id);
+  if (!nowOpen) return;
+  const body = document.getElementById(id + '-body');
+  if (body.dataset.loaded) return;
+  const evs = RECENT.filter(ev => ev.fields && ev.fields['Source'] === srcName);
+  body.innerHTML = _eventsHtml(evs);
+  body.dataset.loaded = '1';
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-TW" data-bs-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>網通設備監控</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<style>
+  :root {
+    --bg:     #0d1117; --row-bg: #161b22; --border: #30363d;
+    --text:   #c9d1d9; --muted:  #b0bac5;
+    --ok:     #3fb950; --warn:   #d29922; --err:    #f85149; --accent: #58a6ff;
+  }
+  body         { background: var(--bg); color: var(--text); font-size: .875rem; }
+  .navbar-dark { background: #010409 !important; border-bottom: 1px solid var(--border); }
+
+  .sys-card    { background: var(--row-bg); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .sys-header  { padding: .75rem 1rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: .6rem; }
+  .sys-body    { padding: .75rem 1rem; }
+  .sys-title   { font-weight: 600; font-size: .95rem; }
+  .sys-sub     { font-size: .74rem; color: var(--muted); }
+
+  .section-hd  { font-size: .66rem; text-transform: uppercase; letter-spacing: .08em;
+                 color: var(--muted); margin-bottom: .5rem; margin-top: .9rem; }
+  .section-hd:first-child { margin-top: 0; }
+
+  .kv-row      { display: flex; justify-content: space-between; align-items: center;
+                 padding: .22rem 0; border-bottom: 1px solid #21262d; font-size: .82rem; }
+  .kv-row:last-child { border: none; }
+  .kv-label    { color: var(--muted); }
+
+  .dot         { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .dot-ok      { background: var(--ok); }
+  .dot-warn    { background: var(--warn); }
+  .dot-error   { background: var(--err); box-shadow: 0 0 6px var(--err); }
+
+  .tunnel-row  { padding: .22rem 0; border-bottom: 1px solid #21262d; font-size: .8rem;
+                 display: flex; align-items: center; gap: .5rem; }
+  .tunnel-row:last-child { border: none; }
+  .tunnel-name { flex: 1; font-family: monospace; font-size: .78rem; }
+  .tunnel-traffic { font-size: .73rem; color: var(--muted); white-space: nowrap; }
+
+  .ha-row      { display: flex; gap: 1rem; margin-bottom: .5rem; }
+  .ha-member   { flex: 1; background: #0d1117; border: 1px solid var(--border);
+                 border-radius: 6px; padding: .5rem .75rem; }
+  .ha-role     { font-size: .65rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .ha-host     { font-size: .82rem; font-weight: 600; margin-bottom: .3rem; }
+  .ha-stat     { font-size: .73rem; color: var(--muted); }
+
+  .c-ok    { color: var(--ok); }
+  .c-warn  { color: var(--warn); }
+  .c-err   { color: var(--err); }
+  .c-muted { color: var(--muted); }
+  .c-accent{ color: var(--accent); }
+
+  .spin { display:inline-block; width:.85rem; height:.85rem; border:2px solid #444;
+          border-top-color:#aaa; border-radius:50%; animation:spin .8s linear infinite; }
+  @keyframes spin { to{transform:rotate(360deg)} }
+</style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark py-2 mb-4">
+  <div class="container-fluid px-4">
+    <span class="navbar-brand fw-semibold mb-0">
+      <a href="/" class="text-decoration-none" style="color:var(--muted)">🖥 主機</a>
+      &nbsp;<span class="c-muted">|</span>&nbsp;
+      <a href="/backup" class="text-decoration-none" style="color:var(--muted)">💾 備份</a>
+      &nbsp;<span class="c-muted">|</span>&nbsp;
+      <a href="/network" class="text-decoration-none text-white">🌐 網通</a>
+    </span>
+    <div class="d-flex align-items-center gap-3">
+      {% if loading %}
+        <span class="c-muted small"><span class="spin"></span> 更新中…</span>
+      {% elif updated %}
+        <span class="c-muted small">更新：{{ updated }}</span>
+      {% endif %}
+      <a href="/refresh/network" class="btn btn-sm btn-outline-secondary py-1">🔄 更新</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid px-4">
+<div class="row g-3">
+
+  <!-- ════════════════ FortiGate ════════════════ -->
+  {% set fg = network.get('fortigate', {}) %}
+  {% if fg and not fg.get('error') %}
+  {% set down_tunnels = fg.tunnels | selectattr('up', 'equalto', false) | list %}
+  {% set up_tunnels   = fg.tunnels | selectattr('up', 'equalto', true)  | list %}
+  {% set fw_status = 'error' if down_tunnels else 'ok' %}
+
+  <div class="col-12 col-md-6 col-xl-4">
+    <div class="sys-card">
+      <div class="sys-header">
+        <span class="dot dot-{{ fw_status }}"></span>
+        <div>
+          <div class="sys-title">FortiGate FGT-201G</div>
+          <div class="sys-sub">{{ fg.ha[0].hostname if fg.ha else '—' }} &nbsp;·&nbsp; HA Active-Passive</div>
+        </div>
+      </div>
+      <div class="sys-body">
+
+        <!-- HA 成員 -->
+        <div class="section-hd">HA 成員</div>
+        <div class="ha-row">
+          {% for m in fg.ha %}
+          <div class="ha-member">
+            <div class="ha-role">{{ 'Primary' if m.role == 'primary' else 'Secondary' }}</div>
+            <div class="ha-host">{{ m.hostname.split('-')[-1] }}</div>
+            <div class="ha-stat">
+              CPU {{ m.cpu }}% &nbsp;·&nbsp; MEM {{ m.mem }}%<br>
+              {{ '{:,}'.format(m.sessions) }} sessions &nbsp;·&nbsp; uptime {{ m.uptime_days }}d
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <!-- Firmware -->
+        <div class="section-hd">Firmware</div>
+        <div class="kv-row">
+          <span class="kv-label">目前版本</span>
+          <span>{{ fg.firmware.current }}</span>
+        </div>
+        {% if fg.firmware.available %}
+        <div class="kv-row">
+          <span class="kv-label">可更新</span>
+          <span class="c-warn">{{ fg.firmware.available[:2] | join(', ') }}</span>
+        </div>
+        {% endif %}
+
+        <!-- IPsec VPN -->
+        <div class="section-hd">
+          IPsec VPN
+          {% if down_tunnels %}
+            <span class="c-err">/ {{ down_tunnels|length }} 條斷線</span>
+          {% else %}
+            <span class="c-ok">/ 全部正常</span>
+          {% endif %}
+        </div>
+
+        {% for t in down_tunnels %}
+        <div class="tunnel-row">
+          <span class="c-err">❌</span>
+          <span class="tunnel-name c-err">{{ t.name }}</span>
+        </div>
+        {% endfor %}
+
+        {% for t in up_tunnels %}
+        <div class="tunnel-row">
+          <span class="c-ok">✅</span>
+          <span class="tunnel-name">{{ t.name }}</span>
+          {% if t.tx_gb > 0 or t.rx_gb > 0 %}
+          <span class="tunnel-traffic">↑{{ t.tx_gb }} GB &nbsp;↓{{ t.rx_gb }} GB</span>
+          {% endif %}
+        </div>
+        {% endfor %}
+
+      </div>
+    </div>
+  </div>
+
+  {% elif fg.get('error') %}
+  <div class="col-12 col-md-6 col-xl-4">
+    <div class="sys-card">
+      <div class="sys-header">
+        <span class="dot dot-error"></span>
+        <div><div class="sys-title">FortiGate</div></div>
+      </div>
+      <div class="sys-body">
+        <span class="c-err small">❌ 連線失敗：{{ fg.error }}</span>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- 無資料 -->
+  {% if not network %}
+  <div class="col-12 text-center py-5 c-muted">
+    {% if loading %}<span class="spin"></span> 載入中…
+    {% else %}無資料，請按更新{% endif %}
+  </div>
+  {% endif %}
+
+</div>
+</div>
+
+<script>
+{% if loading %}
+setInterval(() => {
+  fetch('/api/data').then(r => r.json()).then(d => {
+    if (!d.network_loading) location.reload();
+  });
+}, 3000);
+{% endif %}
+</script>
+
+</body>
+</html>

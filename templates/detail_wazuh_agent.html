@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ label }} — Wazuh 全覽</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<style>
+  :root {
+    --bg:     #0d1117;
+    --card:   #161b22;
+    --border: #30363d;
+    --text:   #c9d1d9;
+    --muted:  #b0bac5;
+    --ok:     #3fb950;
+    --warn:   #d29922;
+    --err:    #f85149;
+    --accent: #58a6ff;
+  }
+  body        { background: var(--bg) !important; color: var(--text) !important; font-size: .875rem; }
+  .navbar-dark{ background: #010409 !important; border-bottom: 1px solid var(--border); }
+  .card       { background: var(--card) !important; border: 1px solid var(--border); border-radius: 6px; color: var(--text) !important; }
+  .c-ok    { color: var(--ok); }
+  .c-warn  { color: var(--warn); }
+  .c-err   { color: var(--err); }
+  .c-muted { color: var(--muted); }
+  .c-accent{ color: var(--accent); }
+
+  table       { border-collapse: separate; border-spacing: 0; width: 100%; }
+  thead th    { background: #010409; color: var(--muted); font-size: .7rem;
+                text-transform: uppercase; letter-spacing: .06em;
+                padding: .4rem .75rem; border-bottom: 1px solid var(--border);
+                position: sticky; top: 0; z-index: 5; white-space: nowrap; }
+  tbody tr    { border-bottom: 1px solid var(--border); }
+  tbody tr:hover { background: #1c2128; }
+  tbody td    { padding: .4rem .75rem; vertical-align: middle; }
+
+  .rule-row   { cursor: pointer; }
+  .rule-row td{ padding: .5rem .75rem; }
+  .sub-row    { display: none; background: #0d1117; }
+  .sub-row td { padding: .3rem .75rem .3rem 2.5rem; border-bottom: 1px solid #21262d; }
+  .sub-row.open { display: table-row; }
+
+  .lv-badge   { display: inline-block; font-size: .7rem; padding: .15rem .45rem;
+                border-radius: 4px; font-weight: 600; min-width: 28px; text-align: center; }
+  .lv-high    { background: #2d1f1f; color: var(--err); }
+  .lv-warn    { background: #2d2500; color: var(--warn); }
+  .lv-low     { background: #1a2d1a; color: var(--ok); }
+  .lv-info    { background: #21262d; color: var(--muted); }
+
+  .eid-chip   { display: inline-block; font-size: .68rem; padding: .1rem .4rem;
+                border-radius: 3px; background: #21262d; border: 1px solid var(--border);
+                margin: .1rem; color: var(--muted); }
+  .action-txt { font-size: .75rem; color: var(--muted); margin-top: .2rem; }
+  a.back      { color: var(--accent); font-size: .85rem; text-decoration: none; }
+  a.back:hover{ color: #79c0ff; }
+  .section-empty { color: var(--muted); font-style: italic; padding: 1rem 0; }
+  .toggle-icon { font-size: .75rem; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark py-2">
+  <div class="container-fluid px-4">
+    <div class="d-flex align-items-center gap-3">
+      <a href="/" class="back">← Dashboard</a>
+      <span class="navbar-brand mb-0 fw-semibold">{{ label }} — Wazuh 全覽</span>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      {% for h in [6, 24, 72] %}
+        <a href="?agent={{ agent }}&label={{ label }}&hours={{ h }}"
+           class="btn btn-sm btn-outline-secondary py-0 {{ 'active' if hours == h else '' }}">{{ h }}h</a>
+      {% endfor %}
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid px-4 py-3">
+
+  {% if error %}
+  <div class="alert alert-danger py-2 small">查詢失敗：{{ error }}</div>
+  {% endif %}
+
+  {% set rules = data.get('by_rule', []) %}
+  {% set total = data.get('total', 0) %}
+
+  <div class="d-flex align-items-center gap-3 mb-3">
+    <span class="c-muted" style="font-size:.8rem">近 {{ hours }}h 共 {{ total }} 筆事件，{{ rules | length }} 個規則</span>
+  </div>
+
+  {% if not rules %}
+    <div class="section-empty">近 {{ hours }}h 無告警事件</div>
+  {% else %}
+  <table>
+    <thead><tr>
+      <th style="width:2rem"></th>
+      <th>嚴重</th>
+      <th>Rule ID</th>
+      <th>說明</th>
+      <th>次數</th>
+      <th>最近</th>
+      <th>建議動作</th>
+    </tr></thead>
+    <tbody>
+    {% for r in rules %}
+    {% set has_sub = r.by_event_id or r.by_source %}
+    <tr class="rule-row" onclick="toggleRule('r{{ loop.index }}', {{ 'true' if has_sub else 'false' }})">
+      <td class="toggle-icon text-center">
+        {% if has_sub %}<span id="ic-r{{ loop.index }}">▶</span>{% endif %}
+      </td>
+      <td>
+        {% if r.level >= 12 %}
+          <span class="lv-badge lv-high">{{ r.level }}</span>
+        {% else %}
+          <span class="lv-badge lv-warn">{{ r.level }}</span>
+        {% endif %}
+      </td>
+      <td>
+        <a href="/detail/wazuh?agent={{ agent }}&rule={{ r.rule_id }}&label={{ label }}&hours={{ hours }}"
+           style="color:var(--accent);text-decoration:none;font-size:.8rem"
+           onclick="event.stopPropagation()">{{ r.rule_id }}</a>
+      </td>
+      <td class="fw-semibold">{{ r.zh }}</td>
+      <td class="c-muted">{{ r.count }}</td>
+      <td class="c-muted" style="font-size:.75rem;white-space:nowrap">{{ r.latest[5:16] }}</td>
+      <td class="c-muted" style="font-size:.75rem">{{ r.action }}</td>
+    </tr>
+
+    {% if r.by_event_id %}
+    <!-- Windows: Event ID sub-rows -->
+    {% for ev in r.by_event_id %}
+    <tr class="sub-row" id="r{{ loop.index }}-sub" data-parent="r{{ loop.outerloop.index if loop.outerloop else '' }}">
+    </tr>
+    {% endfor %}
+    <tr class="sub-row" id="r{{ loop.index }}-sub-eid">
+      <td colspan="7">
+        <div class="d-flex flex-wrap gap-1 py-1" style="font-size:.75rem">
+          <span class="c-muted me-2">Event ID：</span>
+          {% for ev in r.by_event_id %}
+          <a href="/detail/wazuh/event?agent={{ agent }}&rule={{ r.rule_id }}&event_id={{ ev.event_id }}&label={{ label }}&hours={{ hours }}"
+             style="text-decoration:none">
+            <span class="eid-chip">
+              {{ ev.event_id }}{% if ev.explain %} — {{ ev.explain[:30] }}{% endif %}
+              <strong>×{{ ev.count }}</strong>
+            </span>
+          </a>
+          {% endfor %}
+        </div>
+      </td>
+    </tr>
+    {% elif r.by_source %}
+    <!-- Linux: source sub-row -->
+    <tr class="sub-row" id="r{{ loop.index }}-sub-eid">
+      <td colspan="7">
+        <div class="d-flex flex-wrap gap-1 py-1" style="font-size:.75rem">
+          <span class="c-muted me-2">來源：</span>
+          {% for s in r.by_source %}
+          <span class="eid-chip">{{ s.source }} <strong>×{{ s.count }}</strong></span>
+          {% endfor %}
+        </div>
+      </td>
+    </tr>
+    {% endif %}
+
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+function toggleRule(id, hasSub) {
+  if (!hasSub) return;
+  const sub = document.getElementById(id + '-sub-eid');
+  if (!sub) return;
+  const open = sub.classList.toggle('open');
+  const ic = document.getElementById('ic-' + id);
+  if (ic) ic.textContent = open ? '▼' : '▶';
+}
+</script>
+</body>
+</html>

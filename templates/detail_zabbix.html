@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ label }} — Zabbix 詳情</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<style>
+  :root {
+    --bg:     #0d1117;
+    --card:   #161b22;
+    --border: #30363d;
+    --text:   #c9d1d9;
+    --muted:  #b0bac5;
+    --ok:     #3fb950;
+    --warn:   #d29922;
+    --err:    #f85149;
+    --accent: #58a6ff;
+  }
+  body        { background: var(--bg) !important; color: var(--text) !important; font-size: .875rem; }
+  .navbar-dark{ background: #010409 !important; border-bottom: 1px solid var(--border); }
+  .card       { background: var(--card) !important; border: 1px solid var(--border); border-radius: 6px; color: var(--text) !important; }
+  .c-ok    { color: var(--ok); }
+  .c-warn  { color: var(--warn); }
+  .c-err   { color: var(--err); }
+  .c-muted { color: var(--muted); }
+  .c-accent{ color: var(--accent); }
+
+  table       { border-collapse: separate; border-spacing: 0; width: 100%; }
+  thead th    { background: #010409; color: var(--muted); font-size: .7rem;
+                text-transform: uppercase; letter-spacing: .06em;
+                padding: .4rem .75rem; border-bottom: 1px solid var(--border);
+                position: sticky; top: 0; z-index: 5; white-space: nowrap; }
+  tbody tr    { border-bottom: 1px solid var(--border); }
+  tbody tr:hover { background: #1c2128; }
+  tbody td    { padding: .45rem .75rem; vertical-align: middle; }
+
+  .sev-badge  { display: inline-block; font-size: .7rem; padding: .15rem .45rem;
+                border-radius: 4px; font-weight: 600; min-width: 80px; text-align: center; }
+  .sev-0 { background:#21262d; color:var(--muted); }
+  .sev-1 { background:#1a2d4a; color:#79c0ff; }
+  .sev-2 { background:#2d2500; color:var(--warn); }
+  .sev-3 { background:#2d1a00; color:#e3a43a; }
+  .sev-4 { background:#2d1f1f; color:var(--err); }
+  .sev-5 { background:#4a0f0f; color:#ff7b72; }
+
+  .status-chip { display:inline-flex; align-items:center; gap:.4rem; font-size:.85rem;
+                 padding:.3rem .8rem; border-radius:6px; font-weight:600; }
+  .status-up   { background:#0d2818; border:1px solid #1a4723; color:var(--ok); }
+  .status-down { background:#3b0f0f; border:1px solid #6e1c1c; color:var(--err); }
+  .status-unk  { background:#21262d; border:1px solid var(--border); color:var(--muted); }
+
+  a.back      { color: var(--accent); font-size: .85rem; text-decoration: none; }
+  a.back:hover{ color: #79c0ff; }
+  .section-title { font-size:.7rem; text-transform:uppercase; letter-spacing:.07em;
+                   color:var(--muted); margin-bottom:.5rem; }
+  .iface-row  { font-size:.78rem; padding:.2rem 0; border-bottom:1px solid #21262d; }
+  .iface-row:last-child { border:none; }
+  .ack-badge  { font-size:.65rem; background:#21262d; color:var(--muted);
+                border:1px solid var(--border); padding:.1rem .35rem; border-radius:3px; }
+  .rule-row   { cursor: pointer; }
+  .sub-row    { display: none; background: #0d1117; }
+  .sub-row td { padding: .4rem .75rem .4rem 1.5rem; border-bottom: 1px solid #21262d; }
+  .sub-row.open { display: table-row; }
+  .step-row   { display:flex; gap:.75rem; padding:.3rem 0; border-bottom:1px solid #21262d; }
+  .step-row:last-child { border:none; }
+  .step-num   { min-width:1.4rem; color:var(--accent); font-weight:600; font-size:.8rem; }
+  .step-title { color:var(--muted); min-width:90px; font-size:.78rem; }
+  .step-body  { font-family:monospace; font-size:.78rem; color:var(--text); }
+</style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark py-2">
+  <div class="container-fluid px-4">
+    <div class="d-flex align-items-center gap-3">
+      <a href="/" class="back">← Dashboard</a>
+      <span class="navbar-brand mb-0 fw-semibold">{{ label }} — Zabbix 詳情</span>
+    </div>
+    <span style="font-size:.78rem;color:var(--muted)">{{ host }}</span>
+  </div>
+</nav>
+
+<div class="container-fluid px-4 py-3">
+
+  {% if error %}
+  <div class="alert alert-danger py-2 small">查詢失敗：{{ error }}</div>
+  {% endif %}
+
+  {% if data %}
+  {% set d = data %}
+
+  <div class="row g-3 mb-3">
+
+    <!-- 狀態卡 -->
+    <div class="col-lg-4">
+      <div class="card px-3 py-3 h-100">
+        <div class="section-title">主機狀態</div>
+        {% if d.status == 'up' %}
+          <div class="status-chip status-up mb-3">✅ 在線</div>
+        {% elif d.status == 'down' %}
+          <div class="status-chip status-down mb-2">❌ 離線</div>
+          {% if d.error %}
+          <div class="c-err small mb-3" style="word-break:break-all">{{ d.error }}</div>
+          {% endif %}
+        {% else %}
+          <div class="status-chip status-unk mb-3">❓ 未知</div>
+        {% endif %}
+
+        <div class="section-title mt-2">介面</div>
+        {% set type_name = {1:'Agent', 2:'SNMP', 3:'IPMI', 4:'JMX'} %}
+        {% for iface in d.interfaces %}
+        <div class="iface-row d-flex justify-content-between">
+          <span class="c-muted">{{ type_name.get(iface.type|int, iface.type) }}</span>
+          <span>{{ iface.ip or iface.dns }}</span>
+          <span class="{{ 'c-ok' if iface.available == '1' else ('c-err' if iface.available == '2' else 'c-muted') }}">
+            {{ '✅' if iface.available == '1' else ('❌' if iface.available == '2' else '—') }}
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- 問題統計 -->
+    <div class="col-lg-8">
+      <div class="card px-3 py-3 h-100">
+        <div class="section-title">問題摘要</div>
+        {% if not d.problems %}
+          <div class="c-ok small">✅ 目前無未解決問題</div>
+        {% else %}
+          {% set sev_names = {0:'Not classified',1:'Information',2:'Warning',3:'Average',4:'High',5:'Disaster'} %}
+          {% set sev_counts = {} %}
+          {% for p in d.problems %}
+            {% if p.severity not in sev_counts %}{% set _ = sev_counts.update({p.severity: 0}) %}{% endif %}
+          {% endfor %}
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            {% for sev in [5,4,3,2,1,0] %}
+              {% set cnt = d.problems | selectattr('severity','equalto',sev) | list | length %}
+              {% if cnt %}
+              <span class="sev-badge sev-{{ sev }}">
+                {{ ['⬜','🔵','🟡','🟠','🔴','🚨'][sev] }} {{ sev_names[sev] }} ×{{ cnt }}
+              </span>
+              {% endif %}
+            {% endfor %}
+          </div>
+          <div class="c-muted small">共 {{ d.problems|length }} 筆未解決問題</div>
+        {% endif %}
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 問題清單 -->
+  {% if d.problems %}
+  <div class="card px-3 py-2">
+    <div class="section-title mb-2">問題清單（{{ d.problems|length }} 筆）</div>
+    <table>
+      <thead><tr>
+        <th style="width:110px">嚴重度</th>
+        <th>問題描述</th>
+        <th style="width:130px">建議動作</th>
+        <th style="width:85px">發生時間</th>
+        <th style="width:75px">持續</th>
+        <th style="width:55px">確認</th>
+      </tr></thead>
+      <tbody>
+      {% for p in d.problems %}
+      {% set sev_names = {0:'Not classified',1:'Information',2:'Warning',3:'Average',4:'High',5:'Disaster'} %}
+      {% set eid = 'zp-' ~ loop.index %}
+      <tr class="rule-row" onclick="toggleZP('{{ eid }}', {{ 'true' if p.steps else 'false' }})">
+        <td>
+          <span class="sev-badge sev-{{ p.severity }}">
+            {{ ['⬜','🔵','🟡','🟠','🔴','🚨'][p.severity] }} {{ sev_names[p.severity] }}
+          </span>
+        </td>
+        <td>
+          {% if p.zh %}<div class="fw-semibold" style="font-size:.82rem">{{ p.zh }}</div>{% endif %}
+          <div class="c-muted" style="font-size:.72rem">{{ p.name }}</div>
+        </td>
+        <td class="c-muted" style="font-size:.75rem">{{ p.action or '—' }}</td>
+        <td class="c-muted" style="font-size:.75rem;white-space:nowrap">{{ p.ts }}</td>
+        <td class="c-muted" style="font-size:.75rem;white-space:nowrap">{{ p.age_str }}</td>
+        <td>
+          {% if p.ack %}<span class="ack-badge">ACK</span>
+          {% else %}<span class="c-muted">—</span>{% endif %}
+        </td>
+      </tr>
+      {% if p.steps %}
+      <tr class="sub-row" id="{{ eid }}">
+        <td colspan="6">
+          {% for title, body in p.steps %}
+          <div class="step-row">
+            <span class="step-num">{{ loop.index }}.</span>
+            <span class="step-title">{{ title }}</span>
+            <span class="step-body">{{ body }}</span>
+          </div>
+          {% endfor %}
+        </td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% endif %}
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+function toggleZP(id, hasSteps) {
+  if (!hasSteps) return;
+  const row = document.getElementById(id);
+  if (row) row.classList.toggle('open');
+}
+</script>
+</body>
+</html>

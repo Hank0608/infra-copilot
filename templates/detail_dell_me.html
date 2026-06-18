@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-TW" data-bs-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dell ME 複製詳情</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<style>
+  :root {
+    --bg:     #0d1117; --row-bg: #161b22; --border: #30363d;
+    --text:   #c9d1d9; --muted:  #b0bac5;
+    --ok:     #3fb950; --warn:   #d29922; --err:    #f85149; --accent: #58a6ff;
+  }
+  body         { background: var(--bg); color: var(--text); font-size: .875rem; }
+  .navbar-dark { background: #010409 !important; border-bottom: 1px solid var(--border); }
+  .card-dark   { background: var(--row-bg); border: 1px solid var(--border); border-radius: 6px; padding: 1rem 1.25rem; }
+  .section-hd  { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
+                 color: var(--muted); margin-bottom: .6rem; margin-top: 1.2rem; }
+  .section-hd:first-child { margin-top: 0; }
+  .kv-row      { display: flex; justify-content: space-between; padding: .25rem 0;
+                 border-bottom: 1px solid #21262d; font-size: .83rem; }
+  .kv-row:last-child { border: none; }
+  .kv-label    { color: var(--muted); }
+
+  table        { width: 100%; border-collapse: separate; border-spacing: 0; }
+  thead th     { background: #010409; color: var(--muted); font-size: .68rem;
+                 text-transform: uppercase; letter-spacing: .07em;
+                 padding: .4rem .75rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  tbody td     { padding: .45rem .75rem; border-bottom: 1px solid #21262d; font-size: .82rem;
+                 vertical-align: middle; }
+  tbody tr:last-child td { border: none; }
+  .mono        { font-family: monospace; font-size: .8rem; }
+
+  .badge-ok   { display:inline-block; padding:.15rem .5rem; border-radius:3px; font-size:.72rem;
+                background:#0d2818; color:var(--ok);   border:1px solid #1a4723; }
+  .badge-warn { display:inline-block; padding:.15rem .5rem; border-radius:3px; font-size:.72rem;
+                background:#2b1f00; color:var(--warn); border:1px solid #4d3800; }
+  .badge-err  { display:inline-block; padding:.15rem .5rem; border-radius:3px; font-size:.72rem;
+                background:#3b0f0f; color:var(--err);  border:1px solid #6e1c1c; }
+  .badge-na   { display:inline-block; padding:.15rem .5rem; border-radius:3px; font-size:.72rem;
+                background:#161b22; color:var(--muted);border:1px solid var(--border); }
+
+  a.back      { color: var(--accent); font-size: .85rem; text-decoration: none; }
+  a.back:hover{ color: #79c0ff; }
+  .c-ok    { color: var(--ok); }
+  .c-warn  { color: var(--warn); }
+  .c-err   { color: var(--err); }
+  .c-muted { color: var(--muted); }
+  .c-accent{ color: var(--accent); }
+</style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark py-2 mb-4">
+  <div class="container-fluid px-4">
+    <div class="d-flex align-items-center gap-3">
+      <a href="/backup" class="back">← 備份</a>
+      <span class="navbar-brand mb-0 fw-semibold">Dell ME 複製詳情</span>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      {% for h in [24, 48, 168] %}
+        <a href="?hours={{ h }}" class="btn btn-sm btn-outline-secondary py-0 {{ 'active' if hours == h else '' }}">{{ '7d' if h == 168 else (h|string + 'h') }}</a>
+      {% endfor %}
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid px-4">
+
+{% if error %}
+<div class="alert alert-danger">❌ {{ error }}</div>
+{% elif data %}
+
+<div class="row g-3">
+
+  <!-- ── 複製 Sets ── -->
+  <div class="col-12 col-xl-6">
+    <div class="card-dark">
+      <div class="section-hd">複製 Sets</div>
+      <table>
+        <thead>
+          <tr>
+            <th>狀態</th><th>Set 名稱</th><th>Peer</th><th>Primary Volume</th>
+            <th>Queue</th><th>最後成功</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for rs in data.sets %}
+          <tr>
+            <td>
+              {% if rs.active %}
+                <span class="badge-warn">🔄 複製中</span>
+              {% elif rs.ok %}
+                <span class="badge-ok">✅ 正常</span>
+              {% else %}
+                <span class="badge-err">❌ 異常</span>
+              {% endif %}
+            </td>
+            <td class="mono">{{ rs.name }}</td>
+            <td class="c-muted mono" style="font-size:.75rem">{{ rs.peer }}</td>
+            <td class="c-muted" style="font-size:.75rem">{{ rs.primary }}</td>
+            <td class="{{ 'c-warn' if rs.queue > 0 else 'c-muted' }}">{{ rs.queue if rs.queue else '—' }}</td>
+            <td>
+              {{ rs.last }}
+              {% if rs.hours_ago is not none and rs.hours_ago > 24 %}
+                <span class="c-err ms-1" style="font-size:.74rem">({{ rs.hours_ago }}h 前)</span>
+              {% elif rs.hours_ago is not none and rs.hours_ago > 12 %}
+                <span class="c-warn ms-1" style="font-size:.74rem">({{ rs.hours_ago }}h 前)</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Peer 連線 ── -->
+  <div class="col-12 col-xl-6">
+    <div class="card-dark">
+      <div class="section-hd">Peer 連線</div>
+      <table>
+        <thead>
+          <tr><th>Peer 名稱</th><th>類型</th><th>狀態</th><th>Health</th><th>Host</th></tr>
+        </thead>
+        <tbody>
+          {% for p in data.peers %}
+          <tr>
+            <td class="mono">{{ p.name }}</td>
+            <td class="c-muted">{{ p.type }}</td>
+            <td>
+              {% if p.status_num == 1 %}
+                <span class="badge-ok">✅ {{ p.status }}</span>
+              {% else %}
+                <span class="badge-err">❌ {{ p.status }}</span>
+              {% endif %}
+            </td>
+            <td class="{{ 'c-ok' if p.health == 'OK' else 'c-err' }}">{{ p.health }}</td>
+            <td class="c-muted mono" style="font-size:.75rem">{{ p.host }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── 複製歷程 ── -->
+  <div class="col-12">
+    <div class="card-dark">
+      <div class="section-hd">複製歷程（近 {{ hours }}h）</div>
+      {% if data.runs %}
+      <table>
+        <thead>
+          <tr><th>結果</th><th>Set 名稱</th><th>狀態</th><th>開始</th><th>結束</th><th>耗時</th><th>資料量</th></tr>
+        </thead>
+        <tbody>
+          {% for r in data.runs %}
+          <tr>
+            <td>
+              {% if r.result == 'OK' %}
+                <span class="badge-ok">✅ OK</span>
+              {% elif r.result == 'RUNNING' %}
+                <span class="badge-warn">🔄 執行中</span>
+              {% else %}
+                <span class="badge-err">❌ {{ r.result }}</span>
+              {% endif %}
+            </td>
+            <td class="mono">{{ r.set }}</td>
+            <td class="c-muted" style="font-size:.75rem">{{ r.state }}</td>
+            <td class="c-muted">{{ r.start }}</td>
+            <td class="c-muted">{{ r.end }}</td>
+            <td>{{ r.dur }}</td>
+            <td class="c-muted">{{ r.gb }} {% if r.gb != '—' %}GB{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="c-muted small">近 {{ hours }}h 無複製記錄</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ── 事件 ── -->
+  {% if data.events %}
+  <div class="col-12">
+    <div class="card-dark">
+      <div class="section-hd">近期事件（WARNING / ERROR / CRITICAL）</div>
+      <table>
+        <thead>
+          <tr><th>時間</th><th>嚴重度</th><th>訊息</th></tr>
+        </thead>
+        <tbody>
+          {% for e in data.events %}
+          <tr>
+            <td class="c-muted" style="white-space:nowrap">{{ e.ts }}</td>
+            <td>
+              {% if e.severity == 'CRITICAL' %}
+                <span class="badge-err">CRITICAL</span>
+              {% elif e.severity == 'ERROR' %}
+                <span class="badge-err">ERROR</span>
+              {% elif e.severity == 'WARNING' %}
+                <span class="badge-warn">WARNING</span>
+              {% else %}
+                <span class="badge-na">{{ e.severity }}</span>
+              {% endif %}
+            </td>
+            <td style="font-size:.78rem">{{ e.message }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% else %}
+<div class="text-center py-5 c-muted">無資料</div>
+{% endif %}
+
+</div>
+</body>
+</html>

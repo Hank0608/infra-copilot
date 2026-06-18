@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="zh-TW" data-bs-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Infra Dashboard</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<style>
+  :root {
+    --bg:      #0d1117;
+    --row-bg:  #161b22;
+    --row-alt: #0d1117;
+    --border:  #30363d;
+    --text:    #c9d1d9;
+    --muted:   #b0bac5;
+    --ok:      #3fb950;
+    --warn:    #d29922;
+    --err:     #f85149;
+    --accent:  #58a6ff;
+  }
+  body            { background: var(--bg); color: var(--text); font-size: .875rem; }
+  .navbar-dark    { background: #010409 !important; border-bottom: 1px solid var(--border); }
+  .stat-box       { background: #161b22; border: 1px solid var(--border); border-radius: 6px;
+                    padding: .5rem .9rem; min-width: 120px; }
+  .stat-val       { font-size: 1.5rem; font-weight: 600; line-height: 1.1; }
+
+  /* table */
+  table           { border-collapse: separate; border-spacing: 0; width: 100%; }
+  thead th        { background: #010409; color: var(--muted); font-size: .7rem;
+                    text-transform: uppercase; letter-spacing: .07em;
+                    padding: .5rem .75rem; border-bottom: 1px solid var(--border);
+                    position: sticky; top: 0; z-index: 10; }
+  tbody tr.srv-row{ cursor: pointer; background: var(--row-bg);
+                    border-bottom: 1px solid var(--border); transition: background .1s; }
+  tbody tr.srv-row:hover { background: #1c2128; }
+  tbody tr.srv-row td  { padding: .55rem .75rem; vertical-align: middle; }
+  tbody tr.detail-row  { background: #0d1117; }
+  tbody tr.detail-row td { padding: 0; border-bottom: 1px solid var(--border); }
+
+  /* status dot */
+  .dot            { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+  .dot-ok         { background: var(--ok); }
+  .dot-warn       { background: var(--warn); }
+  .dot-error      { background: var(--err); box-shadow: 0 0 6px var(--err); }
+
+  /* source badges in row */
+  .src-badge      { display: inline-block; font-size: .7rem; padding: .1rem .4rem;
+                    border-radius: 3px; border: 1px solid var(--border); }
+  .src-ok         { color: var(--ok);  border-color: #1a4723; background: #0d2818; }
+  .src-warn       { color: var(--warn); border-color: #4d3800; background: #2b1f00; }
+  .src-err        { color: var(--err);  border-color: #6e1c1c; background: #3b0f0f; }
+  .src-na         { color: var(--muted); }
+
+  /* detail panel */
+  .detail-panel   { display: grid; grid-template-columns: repeat(3, 1fr);
+                    gap: 0; border-top: 1px solid var(--border); }
+  .detail-col     { padding: .75rem 1rem; border-right: 1px solid var(--border); }
+  .detail-col:last-child { border-right: none; }
+  .col-title      { font-size: .65rem; text-transform: uppercase; letter-spacing: .07em;
+                    color: var(--muted); margin-bottom: .4rem; }
+  .issue-row      { padding: .2rem 0; border-bottom: 1px solid #21262d; font-size: .8rem; }
+  .issue-row:last-child { border: none; }
+  .issue-action   { color: var(--muted); font-size: .72rem; padding-left: 1.1rem; }
+
+  .c-ok    { color: var(--ok); }
+  .c-warn  { color: var(--warn); }
+  .c-err   { color: var(--err); }
+  .c-muted { color: var(--muted); }
+  .c-accent{ color: var(--accent); }
+
+  .spin { display:inline-block; width:.85rem; height:.85rem; border:2px solid #444;
+          border-top-color:#aaa; border-radius:50%; animation:spin .8s linear infinite; }
+  @keyframes spin { to{transform:rotate(360deg)} }
+
+  .chevron { transition: transform .2s; display: inline-block; }
+  .open .chevron { transform: rotate(90deg); }
+
+  /* toolbar */
+  .filter-bar   { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin-bottom:.75rem; }
+  .chip         { display:inline-flex; align-items:center; gap:.3rem;
+                  font-size:.75rem; padding:.2rem .65rem; border-radius: 20px; cursor:pointer;
+                  border: 1px solid var(--border); background:#161b22; color:var(--muted);
+                  user-select:none; transition: all .15s; }
+  .chip:hover   { border-color:#58a6ff; color:var(--text); }
+  .chip.active  { background:#1f3a5f; border-color:#58a6ff; color:#c9d1d9; }
+  .chip.c-err-chip  { border-color:#6e1c1c; background:#2b0f0f; color:var(--err); }
+  .chip.c-warn-chip { border-color:#4d3800; background:#2b1f00; color:var(--warn); }
+  .chip.c-ok-chip   { border-color:#1a4723; background:#0d2818; color:var(--ok); }
+  .chip.active.c-err-chip  { background:#6e1c1c; }
+  .chip.active.c-warn-chip { background:#4d3800; }
+  .chip.active.c-ok-chip   { background:#1a4723; }
+  .divider      { width:1px; height:1.2rem; background:var(--border); margin:0 .25rem; }
+  .sort-icon    { color:var(--muted); font-size:.8rem; margin-left:.25rem; cursor:pointer; }
+  .sort-icon.asc::after  { content: ' ↑'; }
+  .sort-icon.desc::after { content: ' ↓'; }
+  thead th.sortable { cursor:pointer; }
+  thead th.sortable:hover { color:var(--text); }
+  .search-box   { background:#161b22; border:1px solid var(--border); border-radius:4px;
+                  color:var(--text); font-size:.78rem; padding:.2rem .6rem; outline:none;
+                  width:160px; }
+  .search-box::placeholder { color:var(--muted); }
+  .search-box:focus { border-color:#58a6ff; }
+</style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar navbar-dark py-2">
+  <div class="container-fluid px-4">
+    <span class="navbar-brand fw-semibold mb-0">
+      <a href="/" class="text-decoration-none text-white">🖥 主機</a>
+      &nbsp;<span class="c-muted">|</span>&nbsp;
+      <a href="/backup" class="text-decoration-none" style="color:var(--muted)">💾 備份</a>
+      &nbsp;<span class="c-muted">|</span>&nbsp;
+      <a href="/network" class="text-decoration-none" style="color:var(--muted)">🌐 網通</a>
+    </span>
+    <div class="d-flex align-items-center gap-3">
+      {% if state.loading %}
+        <span class="c-muted small"><span class="spin"></span> 更新中…</span>
+      {% elif state.updated %}
+        <span class="c-muted small">更新：{{ state.updated }} &nbsp;·&nbsp; <span id="cd-num">60</span>s 後重整</span>
+      {% endif %}
+      <div class="d-flex gap-1">
+        {% for h in [6, 24] %}
+          <a href="?hours={{ h }}"
+             class="btn btn-sm py-0 {{ 'btn-secondary' if hours == h else 'btn-outline-secondary' }}">{{ h }}h</a>
+        {% endfor %}
+      </div>
+      <a href="/refresh" class="btn btn-sm btn-outline-secondary py-1">🔄 更新</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid px-4 py-3">
+
+  {% if state.error %}
+  <div class="alert alert-danger py-2 small">錯誤：{{ state.error }}</div>
+  {% endif %}
+
+  <!-- 頂部 Filter Bar -->
+  {% if state.servers %}
+  {% set n_err  = state.servers | selectattr('status','equalto','error') | list | length %}
+  {% set n_warn = state.servers | selectattr('status','equalto','warn')  | list | length %}
+  {% set n_ok   = state.servers | selectattr('status','equalto','ok')    | list | length %}
+  {% set teams  = state.servers | map(attribute='team') | unique | list %}
+
+  <div class="filter-bar">
+    <!-- 狀態篩選 -->
+    {% if n_err %}
+    <span class="chip c-err-chip" id="chip-error" onclick="filterStatus('error')">
+      🔴 {{ n_err }} 異常
+    </span>
+    {% endif %}
+    {% if n_warn %}
+    <span class="chip c-warn-chip" id="chip-warn" onclick="filterStatus('warn')">
+      🟠 {{ n_warn }} 警告
+    </span>
+    {% endif %}
+    <span class="chip c-ok-chip" id="chip-ok" onclick="filterStatus('ok')">
+      ✅ {{ n_ok }} 正常
+    </span>
+    <span class="chip active" id="chip-all" onclick="filterStatus(null)">全部 {{ state.servers|length }}</span>
+
+    <div class="divider"></div>
+
+    <!-- Team 篩選 -->
+    <span class="c-muted" style="font-size:.72rem">Team:</span>
+    {% for team in teams %}
+    <span class="chip team-btn" data-team="{{ team }}" onclick="filterTeam('{{ team }}')">{{ team }}</span>
+    {% endfor %}
+
+    <div class="divider"></div>
+
+    <!-- 搜尋 -->
+    <input class="search-box" type="text" placeholder="搜尋主機…" oninput="filterSearch(this.value)">
+  </div>
+  {% endif %}
+
+  <!-- Server table -->
+  {% if not state.servers and state.loading %}
+    <div class="text-center py-5 c-muted"><span class="spin"></span> 載入中…</div>
+  {% elif not state.servers %}
+    <div class="text-center py-5 c-muted">無資料，請按更新</div>
+  {% else %}
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:2rem"></th>
+        <th style="width:1.5rem"></th>
+        <th class="sortable" onclick="sortBy('label')" id="th-label">主機 <span class="sort-icon" id="si-label"></span></th>
+        <th class="sortable" onclick="sortBy('ip')"    id="th-ip">IP <span class="sort-icon" id="si-ip"></span></th>
+        <th>Team</th>
+        <th>Zabbix</th>
+        <th>Wazuh</th>
+        <th>帳號安全</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for srv in state.servers %}
+    {% set sid = loop.index %}
+
+    <!-- Summary row -->
+    <tr class="srv-row" onclick="toggle({{ sid }})"
+        data-label="{{ srv.label }}" data-ip="{{ srv.ip }}"
+        data-team="{{ srv.team }}" data-status="{{ srv.status }}"
+        data-detail="detail-{{ sid }}">
+      <td class="text-center"><span class="chevron c-muted" id="chev-{{ sid }}">›</span></td>
+      <td><span class="dot dot-{{ srv.status }}"></span></td>
+      <td class="fw-semibold">{{ srv.label }}
+        {% if srv.desc %}<span class="c-muted fw-normal ms-1" style="font-size:.78rem">{{ srv.desc }}</span>{% endif %}
+      </td>
+      <td class="c-muted" style="font-size:.78rem">{{ srv.ip }}</td>
+      <td><span style="font-size:.72rem;color:var(--muted)">{{ srv.team }}</span></td>
+
+      <!-- Zabbix badge -->
+      <td>
+        {% set z = srv.zabbix %}
+        {% if z %}
+          {% if z.problems %}
+            <a href="/detail/zabbix?host={{ z.name }}&label={{ srv.label }}" style="text-decoration:none">
+              {% set max_sev = z.problems | map(attribute='severity') | max %}
+              {% if max_sev >= 4 %}
+                <span class="src-badge src-err">🔴 {{ z.problems|length }} 告警</span>
+              {% else %}
+                <span class="src-badge src-warn">🟠 {{ z.problems|length }} 告警</span>
+              {% endif %}
+            </a>
+          {% elif z.status == 'down' %}
+            <a href="/detail/zabbix?host={{ z.name }}&label={{ srv.label }}" style="text-decoration:none">
+              <span class="src-badge src-err">❌ 離線</span>
+            </a>
+          {% else %}
+            <span class="src-badge src-ok">✅ 正常</span>
+          {% endif %}
+        {% else %}
+          <span class="src-badge src-na">—</span>
+        {% endif %}
+      </td>
+
+      <!-- Wazuh badge -->
+      <td>
+        {% set w = srv.wazuh %}
+        {% if w %}
+          {% if not w.issues %}
+            <span class="src-badge src-ok">✅ 無異常</span>
+          {% else %}
+            {% set max_lv = w.issues | map(attribute='level') | max %}
+            <a href="/detail/wazuh/agent?agent={{ w.agent }}&label={{ srv.label }}" style="text-decoration:none">
+              {% if max_lv >= 12 %}
+                <span class="src-badge src-err">🔴 {{ w.issues|length }} 告警</span>
+              {% else %}
+                <span class="src-badge src-warn">🟠 {{ w.issues|length }} 告警</span>
+              {% endif %}
+            </a>
+          {% endif %}
+        {% else %}
+          <span class="src-badge src-na">—</span>
+        {% endif %}
+      </td>
+
+      <!-- 帳號安全 badge -->
+      <td>
+        {% set a = srv.ad %}
+        {% if a %}
+          {% if a.locked %}
+            <a href="/detail/ad?label={{ srv.label }}" style="text-decoration:none">
+              <span class="src-badge src-warn">⚠ {{ a.locked|length }} 鎖定</span></a>
+          {% elif a.expiring_overdue %}
+            <a href="/detail/ad?label={{ srv.label }}" style="text-decoration:none">
+              <span class="src-badge src-warn">🔑 {{ a.expiring_overdue|length }} 到期</span></a>
+          {% else %}
+            <span class="src-badge src-ok">✅ 正常</span>
+          {% endif %}
+        {% else %}
+          <span class="src-badge src-na">—</span>
+        {% endif %}
+      </td>
+    </tr>
+
+    <!-- Detail row (hidden by default) -->
+    <tr class="detail-row" id="detail-{{ sid }}" style="display:none">
+      <td colspan="8">
+        <div class="detail-panel">
+
+          <!-- Zabbix detail -->
+          <div class="detail-col">
+            <div class="col-title d-flex justify-content-between align-items-center">
+              Zabbix
+              {% if srv.zabbix and (srv.zabbix.status == 'down' or srv.zabbix.problems) %}
+              <a href="/detail/zabbix?host={{ srv.zabbix.name }}&label={{ srv.label }}" class="c-accent" style="font-size:.72rem;text-decoration:none">詳情 →</a>
+              {% endif %}
+            </div>
+            {% set z = srv.zabbix %}
+            {% if z %}
+              {% if z.status == 'up' %}
+                <div class="c-ok small">✅ 在線{% if z.name %} <span class="c-muted">({{ z.name }})</span>{% endif %}</div>
+              {% elif z.status == 'down' %}
+                <div class="c-err small">❌ 離線{% if z.error %} — {{ z.error[:60] }}{% endif %}</div>
+              {% else %}
+                <div class="c-muted small">❓ 未知</div>
+              {% endif %}
+              {% if z.problems %}
+              <div class="mt-2">
+                {% for p in z.problems %}
+                <div class="issue-row">
+                  {% set icons = ['⬜','🔵','🟡','🟠','🔴','🚨'] %}
+                  {{ icons[p.severity] if p.severity < 6 else '🔴' }}
+                  {{ p.name }}
+                  {% if p.ack %}<span class="badge bg-secondary ms-1" style="font-size:.6rem">ACK</span>{% endif %}
+                </div>
+                {% endfor %}
+              </div>
+              {% elif z.status == 'up' %}
+              <div class="c-muted small mt-1">無 Problem</div>
+              {% endif %}
+            {% else %}
+              <div class="c-muted small">未在 Zabbix 監控</div>
+            {% endif %}
+          </div>
+
+          <!-- Wazuh detail -->
+          <div class="detail-col">
+            <div class="col-title d-flex justify-content-between align-items-center">
+              Wazuh 告警（近 24h）
+              {% if srv.wazuh and srv.wazuh.issues %}
+              <a href="/detail/wazuh/agent?agent={{ srv.wazuh.agent }}&label={{ srv.label }}" class="c-accent" style="font-size:.72rem;text-decoration:none">詳情 →</a>
+              {% endif %}
+            </div>
+            {% set w = srv.wazuh %}
+            {% if w %}
+              {% if not w.issues %}
+                <div class="c-ok small">✅ 無異常</div>
+              {% else %}
+                {% for issue in w.issues %}
+                <div class="issue-row">
+                  <a href="/detail/wazuh?agent={{ w.agent }}&rule={{ issue.rule_id }}&label={{ srv.label }}"
+                     style="text-decoration:none;color:inherit;display:block">
+                    <span class="{{ 'c-err' if issue.level >= 12 else 'c-warn' }}">
+                      {{ '🔴' if issue.level >= 12 else '🟠' }}
+                    </span>
+                    <strong>{{ issue.zh }}</strong>
+                    <span class="c-muted ms-1">×{{ issue.count }}</span>
+                    <span class="float-end c-muted">{{ issue.latest[5:16] }}</span>
+                  </a>
+                  <div class="issue-action">→ {{ issue.action }}</div>
+                </div>
+                {% endfor %}
+              {% endif %}
+            {% else %}
+              <div class="c-muted small">未設定 Wazuh agent</div>
+            {% endif %}
+          </div>
+
+          <!-- AD detail -->
+          <div class="detail-col">
+            <div class="col-title d-flex justify-content-between align-items-center">
+              帳號安全
+              {% if srv.ad %}
+              <a href="/detail/ad?label={{ srv.label }}" class="c-accent" style="font-size:.72rem;text-decoration:none">詳情 →</a>
+              {% endif %}
+            </div>
+            {% set a = srv.ad %}
+            {% if a %}
+
+              {% if a.locked %}
+              <div class="c-warn small mb-1">⚠ 鎖定帳號 {{ a.locked|length }} 筆</div>
+              {% for lk in a.locked[:5] %}
+              <div class="issue-row">
+                {{ '🔴' if lk.high_risk else '🟠' }}
+                {{ lk.displayName }} <span class="c-muted">({{ lk.username }})</span>
+                <span class="float-end c-muted">{{ lk.days_locked }}d / bad={{ lk.bad_pwd_count }}</span>
+              </div>
+              {% endfor %}
+              {% else %}
+              <div class="c-ok small">✅ 無鎖定帳號</div>
+              {% endif %}
+
+              {% if a.lockout_events %}
+              <div class="c-muted small mt-2 mb-1">🔒 鎖定事件（24h） {{ a.lockout_events|length }} 筆</div>
+              {% for ev in a.lockout_events[:4] %}
+              <div class="issue-row">
+                {{ ev.target_user }}<span class="float-end c-muted">{{ ev.ts[5:16] }}</span>
+              </div>
+              {% endfor %}
+              {% endif %}
+
+              {% if a.high_fail %}
+              <div class="c-warn small mt-2 mb-1">登入失敗異常帳號</div>
+              {% for u, cnt in a.high_fail %}
+              <div class="issue-row">{{ u }}<span class="float-end">{{ cnt }} 次</span></div>
+              {% endfor %}
+              {% elif a.logon_total is defined %}
+              <div class="c-muted small mt-1">登入失敗 {{ a.logon_total }} 次（24h）</div>
+              {% endif %}
+
+              {% if a.expiring_overdue or a.expiring_urgent %}
+              <div class="mt-2" style="font-size:.78rem">
+                {% for u in a.expiring_overdue %}
+                <div class="issue-row"><span class="c-err">🔴 {{ u.displayName }}</span>
+                  <span class="float-end c-err">{{ u.daysLeft }}d</span></div>
+                {% endfor %}
+                {% for u in a.expiring_urgent %}
+                <div class="issue-row"><span class="c-warn">🟠 {{ u.displayName }}</span>
+                  <span class="float-end c-warn">剩{{ u.daysLeft }}d</span></div>
+                {% endfor %}
+              </div>
+              {% else %}
+              <div class="c-ok small mt-1">✅ 無密碼到期</div>
+              {% endif %}
+
+              {% set chg = a.changes %}
+              {% if chg and (chg.created or chg.disabled) %}
+              <div class="c-muted small mt-2">帳號異動（7d）：新建 {{ chg.created|length }} / 停用 {{ chg.disabled|length }}</div>
+              {% for r in chg.created[:3] %}
+              <div class="issue-row c-muted" style="font-size:.75rem">✨ {{ r.displayName }}
+                <span class="float-end">{{ r.changed_at[5:16] }}</span></div>
+              {% endfor %}
+              {% for r in chg.disabled[:3] %}
+              <div class="issue-row c-muted" style="font-size:.75rem">🚫 {{ r.displayName }}
+                <span class="float-end">{{ r.changed_at[5:16] }}</span></div>
+              {% endfor %}
+              {% endif %}
+
+            {% else %}
+              <div class="c-muted small">— 不適用</div>
+            {% endif %}
+          </div>
+
+        </div><!-- detail-panel -->
+      </td>
+    </tr>
+
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% endif %}
+</div>
+
+<script>
+/* ── row expand ── */
+function toggle(id) {
+  const row  = document.getElementById('detail-' + id);
+  const chev = document.getElementById('chev-' + id);
+  const open = row.style.display !== 'none';
+  row.style.display    = open ? 'none' : 'table-row';
+  chev.style.transform = open ? '' : 'rotate(90deg)';
+}
+
+/* ── visibility helper ── */
+function _applyVisibility() {
+  document.querySelectorAll('.srv-row').forEach(row => {
+    const show = row._showStatus !== false && row._showTeam !== false && row._showSearch !== false;
+    row.style.display = show ? '' : 'none';
+    const detail = document.getElementById(row.dataset.detail);
+    if (detail && !show) detail.style.display = 'none';
+  });
+}
+
+/* ── status filter ── */
+let activeStatus = null;
+function filterStatus(status) {
+  activeStatus = status;
+  document.querySelectorAll('.srv-row').forEach(r => {
+    r._showStatus = !status || r.dataset.status === status;
+  });
+  _applyVisibility();
+  ['error','warn','ok','all'].forEach(s => {
+    const c = document.getElementById('chip-' + s);
+    if (c) c.classList.toggle('active', s === (status || 'all'));
+  });
+}
+
+/* ── team filter ── */
+let activeTeam = null;
+function filterTeam(team) {
+  activeTeam = activeTeam === team ? null : team;
+  document.querySelectorAll('.srv-row').forEach(r => {
+    r._showTeam = !activeTeam || r.dataset.team === activeTeam;
+  });
+  _applyVisibility();
+  document.querySelectorAll('.team-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.team === activeTeam);
+  });
+}
+
+/* ── search filter ── */
+function filterSearch(val) {
+  const q = val.toLowerCase();
+  document.querySelectorAll('.srv-row').forEach(r => {
+    r._showSearch = !q || r.dataset.label.toLowerCase().includes(q)
+                       || r.dataset.ip.includes(q)
+                       || r.dataset.team.toLowerCase().includes(q);
+  });
+  _applyVisibility();
+}
+
+/* ── sort ── */
+let sortState = { key: null, dir: 1 };
+function sortBy(key) {
+  if (sortState.key === key) sortState.dir *= -1;
+  else { sortState.key = key; sortState.dir = 1; }
+
+  const tbody = document.querySelector('tbody');
+  const srvRows = [...document.querySelectorAll('.srv-row')];
+
+  srvRows.sort((a, b) => {
+    const va = a.dataset[key] || '', vb = b.dataset[key] || '';
+    let cmp;
+    if (key === 'ip') {
+      const n = ip => ip.split('.').reduce((acc, x) => acc * 256 + (parseInt(x)||0), 0);
+      cmp = n(va) - n(vb);
+    } else {
+      cmp = va.localeCompare(vb, 'zh-Hant-TW', {numeric: true});
+    }
+    return cmp * sortState.dir;
+  });
+
+  for (const srvRow of srvRows) {
+    const detailRow = document.getElementById(srvRow.dataset.detail);
+    tbody.appendChild(srvRow);
+    if (detailRow) tbody.appendChild(detailRow);
+  }
+
+  // update icons
+  ['label','ip'].forEach(k => {
+    const el = document.getElementById('si-' + k);
+    if (!el) return;
+    el.className = 'sort-icon' + (sortState.key === k ? (sortState.dir === 1 ? ' asc' : ' desc') : '');
+  });
+}
+
+/* ── auto reload with countdown ── */
+const lastUpdated = {{ state.updated | tojson }};
+let _cd = 60;
+const _cdEl = document.getElementById('cd-num');
+setInterval(() => {
+  _cd--;
+  if (_cdEl) _cdEl.textContent = _cd;
+  if (_cd <= 0) {
+    _cd = 60;
+    fetch('/api/data').then(r => r.json()).then(d => {
+      if (d.updated && d.updated !== lastUpdated && !d.loading) location.reload();
+    });
+  }
+}, 1000);
+</script>
+</body>
+</html>

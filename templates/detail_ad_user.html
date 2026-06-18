@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ username }} — 帳號詳情</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<style>
+  :root {
+    --bg:     #0d1117;
+    --card:   #161b22;
+    --border: #30363d;
+    --text:   #c9d1d9;
+    --muted:  #b0bac5;
+    --ok:     #3fb950;
+    --warn:   #d29922;
+    --err:    #f85149;
+    --accent: #58a6ff;
+  }
+  body        { background: var(--bg) !important; color: var(--text) !important; font-size: .875rem; }
+  .navbar-dark{ background: #010409 !important; border-bottom: 1px solid var(--border); }
+  .card       { background: var(--card) !important; border: 1px solid var(--border); border-radius: 6px; color: var(--text) !important; }
+  .c-ok    { color: var(--ok); }
+  .c-warn  { color: var(--warn); }
+  .c-err   { color: var(--err); }
+  .c-muted { color: var(--muted); }
+  .c-accent{ color: var(--accent); }
+
+  table       { border-collapse: separate; border-spacing: 0; width: 100%; }
+  thead th    { background: #010409; color: var(--muted); font-size: .7rem;
+                text-transform: uppercase; letter-spacing: .06em;
+                padding: .4rem .75rem; border-bottom: 1px solid var(--border);
+                position: sticky; top: 0; z-index: 5; white-space: nowrap; }
+  tbody tr    { border-bottom: 1px solid var(--border); }
+  tbody tr:hover { background: #1c2128; }
+  tbody td    { padding: .4rem .75rem; vertical-align: middle; }
+
+  .field-row  { display: flex; gap: .5rem; padding: .25rem 0; border-bottom: 1px solid #21262d; font-size: .83rem; }
+  .field-row:last-child { border: none; }
+  .field-k    { color: var(--muted); min-width: 90px; flex-shrink: 0; }
+  .group-tag  { display: inline-block; font-size: .68rem; padding: .1rem .4rem;
+                border-radius: 3px; background: #21262d; border: 1px solid var(--border);
+                margin: .1rem; color: var(--muted); }
+  .section-title { font-size: .7rem; text-transform: uppercase; letter-spacing: .07em;
+                   color: var(--muted); margin-bottom: .5rem; }
+  a.back      { color: var(--accent); font-size: .85rem; text-decoration: none; }
+  a.back:hover{ color: #79c0ff; }
+  .badge-rule { font-size: .7rem; background: #21262d; color: var(--muted);
+                border: 1px solid var(--border); padding: .15rem .5rem; border-radius: 4px; }
+  .status-badge { font-size: .75rem; padding: .15rem .6rem; border-radius: 4px; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark py-2">
+  <div class="container-fluid px-4">
+    <div class="d-flex align-items-center gap-3">
+      <a href="/detail/ad?label=UTI-DC01&hours={{ hours }}" class="back">← 帳號安全</a>
+      <span class="navbar-brand mb-0 fw-semibold">{{ username }}</span>
+      {% if user_info %}
+        <span class="c-muted" style="font-size:.85rem">{{ user_info.displayName }}</span>
+      {% endif %}
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      {% for h in [6, 24, 72, 168] %}
+        <a href="?username={{ username }}&hours={{ h }}"
+           class="btn btn-sm btn-outline-secondary py-0 {{ 'active' if hours == h else '' }}">{{ h }}h</a>
+      {% endfor %}
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid px-4 py-3">
+
+  {% if error %}
+  <div class="alert alert-danger py-2 small">查詢失敗：{{ error }}</div>
+  {% endif %}
+
+  <div class="row g-3 mb-3">
+
+    <!-- AD 帳號資訊 -->
+    <div class="col-lg-5">
+      <div class="card px-3 py-2 h-100">
+        <div class="section-title">AD 帳號資訊</div>
+        {% if not user_info %}
+          <div class="c-muted small">找不到帳號</div>
+        {% else %}
+        {% set u = user_info %}
+
+        <!-- status badges -->
+        <div class="d-flex gap-2 mb-3">
+          {% if u.disabled %}
+            <span class="status-badge" style="background:#2d1f1f;color:var(--err)">● 已停用</span>
+          {% elif u.locked %}
+            <span class="status-badge" style="background:#2d2500;color:var(--warn)">● 已鎖定</span>
+          {% else %}
+            <span class="status-badge" style="background:#1a2d1a;color:var(--ok)">● 正常</span>
+          {% endif %}
+          {% if u.noExpire %}
+            <span class="status-badge" style="background:#21262d;color:var(--muted)">密碼永不到期</span>
+          {% elif u.daysLeft is not none %}
+            {% if u.daysLeft < 0 %}
+              <span class="status-badge" style="background:#2d1f1f;color:var(--err)">密碼已到期 {{ u.daysLeft | abs }}d 前</span>
+            {% elif u.daysLeft <= 7 %}
+              <span class="status-badge" style="background:#2d2500;color:var(--warn)">密碼 {{ u.daysLeft }}d 後到期</span>
+            {% else %}
+              <span class="status-badge" style="background:#21262d;color:var(--muted)">密碼 {{ u.daysLeft }}d 後到期</span>
+            {% endif %}
+          {% endif %}
+        </div>
+
+        <div class="field-row"><span class="field-k">顯示名稱</span><span>{{ u.displayName }}</span></div>
+        <div class="field-row"><span class="field-k">部門</span><span>{{ u.department or '—' }}</span></div>
+        <div class="field-row"><span class="field-k">職稱</span><span>{{ u.title or '—' }}</span></div>
+        <div class="field-row"><span class="field-k">主管</span><span>{{ u.manager or '—' }}</span></div>
+        <div class="field-row"><span class="field-k">Email</span><span class="c-muted" style="font-size:.8rem">{{ u.mail or '—' }}</span></div>
+        <div class="field-row"><span class="field-k">電話</span><span class="c-muted">{{ u.phone or '—' }}</span></div>
+        <div class="field-row"><span class="field-k">建立日期</span><span class="c-muted">{{ u.created or '—' }}</span></div>
+        <div class="field-row"><span class="field-k">密碼到期</span>
+          <span class="{{ 'c-err' if u.daysLeft is not none and u.daysLeft < 0 else ('c-warn' if u.daysLeft is not none and u.daysLeft <= 7 else 'c-muted') }}">
+            {{ u.pwdExpiry or '永不到期' }}
+          </span>
+        </div>
+        {% if u.groups %}
+        <div class="field-row" style="flex-direction:column;gap:.3rem">
+          <span class="field-k">群組</span>
+          <div>{% for g in u.groups %}<span class="group-tag">{{ g }}</span>{% endfor %}</div>
+        </div>
+        {% endif %}
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- 鎖定事件 -->
+    <div class="col-lg-7">
+      <div class="card px-3 py-2 h-100">
+        <div class="section-title">鎖定事件（近 7 天）{% if lockouts %}<span class="ms-2 badge bg-warning text-dark">{{ lockouts | length }}</span>{% endif %}</div>
+        {% if not lockouts %}
+          <div class="c-muted small">近 7 天無鎖定事件</div>
+        {% else %}
+        <table>
+          <thead><tr><th>時間</th><th>來源電腦</th></tr></thead>
+          <tbody>
+          {% for ev in lockouts %}
+          <tr>
+            <td class="c-muted" style="font-size:.78rem;white-space:nowrap">{{ ev.ts }}</td>
+            <td>{{ ev.caller or '—' }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 登入失敗紀錄 -->
+  <div class="card px-3 py-2">
+    <div class="section-title mb-2">
+      登入失敗（近 {{ hours }}h）
+      {% if failures %}
+        <span class="ms-2 badge bg-secondary">{{ failures | length }}</span>
+      {% endif %}
+    </div>
+    {% if not failures %}
+      <div class="c-muted small">近 {{ hours }}h 無登入失敗事件</div>
+    {% else %}
+    <table>
+      <thead><tr>
+        <th>時間</th><th>來源 IP</th><th>工作站</th><th>失敗原因</th><th>Logon Type</th><th>Process</th>
+      </tr></thead>
+      <tbody>
+      {% for f in failures %}
+      <tr>
+        <td class="c-muted" style="font-size:.78rem;white-space:nowrap">{{ f.ts }}</td>
+        <td class="c-muted">{{ f.ip or '—' }}</td>
+        <td class="c-muted">{{ f.workstation or '—' }}</td>
+        <td>
+          {% set lbl = sub_status.get(f.sub_status, '') %}
+          {% if lbl %}
+            <span class="{{ 'c-err' if '密碼' in lbl or '鎖定' in lbl else 'c-muted' }}">{{ lbl }}</span>
+          {% else %}
+            <span class="c-muted" style="font-size:.75rem">{{ f.sub_status or '—' }}</span>
+          {% endif %}
+        </td>
+        <td class="c-muted">{{ f.logon_type or '—' }}</td>
+        <td class="c-muted" style="font-size:.75rem">{{ f.process or '—' }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

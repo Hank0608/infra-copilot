@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="zh-TW" data-bs-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>備份監控</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<style>
+  :root {
+    --bg:     #0d1117; --row-bg: #161b22; --border: #30363d;
+    --text:   #c9d1d9; --muted:  #b0bac5;
+    --ok:     #3fb950; --warn:   #d29922; --err:    #f85149; --accent: #58a6ff;
+  }
+  body         { background: var(--bg); color: var(--text); font-size: .875rem; }
+  .navbar-dark { background: #010409 !important; border-bottom: 1px solid var(--border); }
+
+  /* ── 系統卡片 ── */
+  .sys-card    { background: var(--row-bg); border: 1px solid var(--border);
+                 border-radius: 8px; overflow: hidden; }
+  .sys-header  { padding: .75rem 1rem; border-bottom: 1px solid var(--border);
+                 display: flex; align-items: center; gap: .6rem; }
+  .sys-body    { padding: .75rem 1rem; }
+  .sys-title   { font-weight: 600; font-size: .95rem; }
+  .sys-ip      { font-size: .74rem; color: var(--muted); }
+  .sys-link    { font-size: .75rem; text-decoration: none; color: var(--accent); margin-left: auto; }
+
+  .section-hd  { font-size: .66rem; text-transform: uppercase; letter-spacing: .08em;
+                 color: var(--muted); margin-bottom: .5rem; margin-top: .9rem; }
+  .section-hd:first-child { margin-top: 0; }
+
+  .kv-row      { display: flex; justify-content: space-between; align-items: center;
+                 padding: .22rem 0; border-bottom: 1px solid #21262d; font-size: .82rem; }
+  .kv-row:last-child { border: none; }
+  .kv-label    { color: var(--muted); }
+
+  /* ── util bar ── */
+  .util-wrap   { display: flex; align-items: center; gap: .5rem; }
+  .util-bar    { flex: 1; height: 7px; background: #21262d; border-radius: 4px; overflow: hidden; }
+  .util-fill   { height: 100%; border-radius: 4px; }
+  .util-pct    { font-size: .75rem; min-width: 2.8rem; text-align: right; }
+
+  /* ── status dot ── */
+  .dot         { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+                 flex-shrink: 0; }
+  .dot-ok      { background: var(--ok); }
+  .dot-warn    { background: var(--warn); }
+  .dot-error   { background: var(--err); box-shadow: 0 0 6px var(--err); }
+
+  /* ── job rows ── */
+  .job-row     { padding: .22rem 0; border-bottom: 1px solid #21262d; font-size: .8rem;
+                 display: flex; align-items: center; gap: .4rem; }
+  .job-row:last-child { border: none; }
+  .job-name    { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .job-ts      { color: var(--muted); font-size: .74rem; white-space: nowrap; }
+
+  .c-ok    { color: var(--ok); }
+  .c-warn  { color: var(--warn); }
+  .c-err   { color: var(--err); }
+  .c-muted { color: var(--muted); }
+  .c-accent{ color: var(--accent); }
+
+  .stat-row    { display: flex; gap: 1.2rem; margin-bottom: .6rem; }
+  .stat-item   { text-align: center; }
+  .stat-num    { font-size: 1.6rem; font-weight: 600; line-height: 1.1; }
+  .stat-lbl    { font-size: .68rem; color: var(--muted); }
+
+  .spin { display:inline-block; width:.85rem; height:.85rem; border:2px solid #444;
+          border-top-color:#aaa; border-radius:50%; animation:spin .8s linear infinite; }
+  @keyframes spin { to{transform:rotate(360deg)} }
+
+  .disk-grid   { display: grid; grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+                 gap: 4px; margin-top: .4rem; }
+  .disk-slot   { border-radius: 4px; padding: .3rem .2rem; text-align: center;
+                 font-size: .65rem; border: 1px solid var(--border); }
+  .disk-ok     { background: #0d2818; border-color: #1a4723; color: var(--ok); }
+  .disk-warn   { background: #2b1f00; border-color: #4d3800; color: var(--warn); }
+  .disk-err    { background: #3b0f0f; border-color: #6e1c1c; color: var(--err); }
+  .disk-empty  { background: #0d1117; border-color: #21262d; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark py-2 mb-4">
+  <div class="container-fluid px-4">
+    <span class="navbar-brand fw-semibold mb-0">
+      <a href="/" class="text-decoration-none" style="color:var(--muted)">🖥 主機</a>
+      &nbsp;<span class="c-muted">|</span>&nbsp;
+      <a href="/backup" class="text-decoration-none text-white">💾 備份</a>
+      &nbsp;<span class="c-muted">|</span>&nbsp;
+      <a href="/network" class="text-decoration-none" style="color:var(--muted)">🌐 網通</a>
+    </span>
+    <div class="d-flex align-items-center gap-3">
+      {% if loading %}
+        <span class="c-muted small"><span class="spin"></span> 更新中…</span>
+      {% elif updated %}
+        <span class="c-muted small">更新：{{ updated }}</span>
+      {% endif %}
+      <a href="/refresh/backup" class="btn btn-sm btn-outline-secondary py-1">🔄 更新</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid px-4">
+<div class="row g-3">
+
+  <!-- ════════════════ PPDM ════════════════ -->
+  {% if ppdm %}
+  {% set p = ppdm %}
+  {% set s = p.summary %}
+  <div class="col-12 col-md-6 col-xl-4">
+    <div class="sys-card">
+      <div class="sys-header">
+        <span class="dot dot-{{ p.status }}"></span>
+        <div>
+          <div class="sys-title">Dell PPDM</div>
+          <div class="sys-ip">10.11.1.32 &nbsp;·&nbsp; 近 {{ p.hours }}h</div>
+        </div>
+        <a href="/detail/ppdm?hours={{ hours }}" class="sys-link">詳情 →</a>
+      </div>
+      <div class="sys-body">
+
+        <!-- 備份摘要數字 -->
+        <div class="stat-row">
+          <div class="stat-item">
+            <div class="stat-num c-ok">{{ s.ok }}</div>
+            <div class="stat-lbl">成功</div>
+          </div>
+          {% if s.failed %}
+          <div class="stat-item">
+            <div class="stat-num c-err">{{ s.failed }}</div>
+            <div class="stat-lbl">失敗</div>
+          </div>
+          {% endif %}
+          {% if s.ok_with_errors %}
+          <div class="stat-item">
+            <div class="stat-num c-warn">{{ s.ok_with_errors }}</div>
+            <div class="stat-lbl">含警告</div>
+          </div>
+          {% endif %}
+          <div class="stat-item">
+            <div class="stat-num c-muted">{{ s.total }}</div>
+            <div class="stat-lbl">總計</div>
+          </div>
+        </div>
+
+        <!-- 儲存空間 -->
+        {% for st in p.storage %}
+        {% if st.type == 'DATA_DOMAIN_SYSTEM' %}
+        {% set util = st.utilization | float %}
+        <div class="section-hd">儲存空間 — {{ st.name }}</div>
+        <div class="util-wrap mb-1">
+          <div class="util-bar">
+            <div class="util-fill"
+                 style="width:{{ [util,100]|min }}%;background:{{ '#f85149' if util>=85 else ('#d29922' if util>=70 else '#3fb950') }}">
+            </div>
+          </div>
+          <span class="util-pct {{ 'c-err' if util>=85 else ('c-warn' if util>=70 else 'c-ok') }}">{{ util }}%</span>
+        </div>
+        <div class="c-muted" style="font-size:.75rem">{{ st.get('used_tb','?') }} TB / {{ st.get('total_tb','?') }} TB
+          {% if st.get('compression') %}&nbsp;·&nbsp; 壓縮 {{ st.compression }}x{% endif %}
+        </div>
+        {% endif %}
+        {% endfor %}
+
+        <!-- 失敗作業 -->
+        {% if p.failed_jobs %}
+        <div class="section-hd">失敗作業</div>
+        {% for j in p.failed_jobs[:5] %}
+        <div class="job-row">
+          <span class="c-err">❌</span>
+          <span class="job-name">{{ j.name }}</span>
+          <span class="job-ts">{{ j.end }}</span>
+        </div>
+        {% endfor %}
+        {% if p.failed_jobs|length > 5 %}
+        <div class="c-muted" style="font-size:.74rem">… 共 {{ p.failed_jobs|length }} 筆</div>
+        {% endif %}
+        {% elif p.warn_jobs %}
+        <div class="section-hd">含警告作業</div>
+        {% for j in p.warn_jobs[:3] %}
+        <div class="job-row">
+          <span class="c-warn">🟠</span>
+          <span class="job-name">{{ j.name }}</span>
+          <span class="job-ts">{{ j.end }}</span>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="c-ok small mt-2">✅ 無失敗作業</div>
+        {% endif %}
+
+        <!-- 告警 -->
+        {% if p.crit_alerts %}
+        <div class="section-hd">嚴重告警</div>
+        {% for a in p.crit_alerts[:3] %}
+        <div class="kv-row">
+          <span class="c-err" style="font-size:.78rem">🚨 {{ a.msg[:70] }}</span>
+          <span class="c-muted ms-2" style="white-space:nowrap;font-size:.72rem">{{ a.ts }}</span>
+        </div>
+        {% endfor %}
+        {% endif %}
+
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ════════════════ Synology NAS ════════════════ -->
+  {% for nas in synology %}
+  <div class="col-12 col-md-6 col-xl-4">
+    <div class="sys-card">
+      <div class="sys-header">
+        <span class="dot dot-{{ nas.status }}"></span>
+        <div>
+          <div class="sys-title">{{ nas.label }}</div>
+          <div class="sys-ip">{{ nas.host }}
+            {% if nas.info and nas.info.model %}&nbsp;·&nbsp; {{ nas.info.model }}{% endif %}
+            {% if nas.info and nas.info.uptime_str %}&nbsp;·&nbsp; uptime {{ nas.info.uptime_str }}{% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="sys-body">
+
+        {% if nas.errors %}
+        <div class="c-err small mb-2">❌ 連線失敗：{{ nas.errors | join('; ') }}</div>
+        {% else %}
+
+        <!-- 磁碟區 -->
+        {% if nas.volumes %}
+        <div class="section-hd">磁碟區</div>
+        {% for v in nas.volumes %}
+        {% set util = v.util | float %}
+        <div class="kv-row">
+          <span>{{ v.id }}</span>
+          <span class="{{ 'c-err' if v.status not in ('normal','') else 'c-ok' }}" style="font-size:.75rem">
+            {{ v.status if v.status not in ('normal','') else '正常' }}
+          </span>
+        </div>
+        <div class="util-wrap mb-2">
+          <div class="util-bar">
+            <div class="util-fill"
+                 style="width:{{ [util,100]|min }}%;background:{{ '#f85149' if util>=90 else ('#d29922' if util>=75 else '#3fb950') }}">
+            </div>
+          </div>
+          <span class="util-pct {{ 'c-err' if util>=90 else ('c-warn' if util>=75 else 'c-ok') }}">{{ util }}%</span>
+        </div>
+        <div class="c-muted" style="font-size:.75rem;margin-top:-.6rem;margin-bottom:.5rem">
+          {{ v.used_tb }} TB / {{ v.total_tb }} TB
+        </div>
+        {% endfor %}
+        {% endif %}
+
+        <!-- 磁碟健康 -->
+        {% if nas.disks %}
+        {% set installed = nas.disks | selectattr('status', 'ne', 'not_installed') | list %}
+        {% set bad = installed | selectattr('status', 'ne', 'normal') | list %}
+        {% set failing = installed | selectattr('smart', 'equalto', 'failing') | list %}
+        <div class="section-hd">磁碟 {{ installed|length }} 顆
+          {% if bad or failing %}
+            <span class="c-err">/ {{ (bad|length) + (failing|length) }} 異常</span>
+          {% else %}
+            <span class="c-ok">/ 全部正常</span>
+          {% endif %}
+        </div>
+        <div class="disk-grid">
+          {% for d in nas.disks %}
+          {% if d.status == 'not_installed' %}
+          <div class="disk-slot disk-empty" title="未安裝">—</div>
+          {% elif d.smart == 'failing' or d.status not in ('normal','') %}
+          <div class="disk-slot disk-err" title="slot {{ d.slot }}: {{ d.status }} smart={{ d.smart }}">
+            {{ d.slot }}<br>⚠
+          </div>
+          {% else %}
+          <div class="disk-slot disk-ok" title="slot {{ d.slot }}: {{ d.model }}{% if d.temp %} {{ d.temp }}°C{% endif %}">
+            {{ d.slot }}{% if d.temp %}<br>{{ d.temp }}°{% endif %}
+          </div>
+          {% endif %}
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <!-- Snapshot Replication -->
+        {% if nas.repl_tasks %}
+        <div class="section-hd">Snapshot Replication</div>
+        {% for t in nas.repl_tasks %}
+        <div class="job-row">
+          {% if t.status == 'running' %}
+            <span class="c-accent">⏳</span>
+          {% elif t.status == 'ok' %}
+            <span class="c-ok">✅</span>
+          {% elif t.status == 'error' %}
+            <span class="c-err">❌</span>
+          {% elif t.status == 'warn' %}
+            <span class="c-warn">🟠</span>
+          {% else %}
+            <span class="c-muted">⬜</span>
+          {% endif %}
+          <span class="job-name">{{ t.name }}{% if t.target %} <span class="c-muted">→ {{ t.target }}</span>{% endif %}</span>
+          <span class="job-ts">{{ t.last_time or '—' }}</span>
+        </div>
+        {% endfor %}
+        {% endif %}
+
+        <!-- ABB 備份任務 -->
+        {% if nas.abb_tasks %}
+        <div class="section-hd">Active Backup 任務</div>
+        {% for t in nas.abb_tasks %}
+        <div class="job-row">
+          {% if t.running %}
+            <span class="c-accent" title="執行中">⏳</span>
+          {% elif t.last_status == 3 %}
+            <span class="c-ok">✅</span>
+          {% elif t.last_status in (4, 5) %}
+            <span class="c-err">❌</span>
+          {% elif t.last_status in (6, 7) %}
+            <span class="c-warn">🟠</span>
+          {% else %}
+            <span class="c-muted">⬜</span>
+          {% endif %}
+          <span class="job-name">{{ t.name }}</span>
+          <span class="job-ts">
+            {% if t.running %}執行中{% else %}{{ t.last_time or '—' }}{% endif %}
+          </span>
+        </div>
+        {% endfor %}
+        {% endif %}
+
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+
+  <!-- ════════════════ Dell ME 複製 ════════════════ -->
+  {% if dell_me and not dell_me.get('error') %}
+  <div class="col-12 col-md-6 col-xl-4">
+    <div class="sys-card">
+      <div class="sys-header">
+        <span class="dot dot-{{ 'error' if dell_me.overall == 'error' else 'ok' }}"></span>
+        <div>
+          <div class="sys-title">Dell ME 複製</div>
+          <div class="sys-ip">ME4024 / ME5024 / ME5224 &nbsp;·&nbsp; 近 24h</div>
+        </div>
+        <a href="/detail/dell_me" class="sys-link">詳情 →</a>
+      </div>
+      <div class="sys-body">
+
+        <!-- Peer 連線 -->
+        {% if dell_me.peers %}
+        <div class="section-hd">Peer 連線</div>
+        {% for p in dell_me.peers %}
+        <div class="kv-row">
+          <span class="kv-label">{{ p.name }}</span>
+          <span class="{{ 'c-ok' if p.ok else 'c-err' }}">{{ '✅ Connected' if p.ok else '❌ ' + p.status }}</span>
+        </div>
+        {% endfor %}
+        {% endif %}
+
+        <!-- 複製 Sets -->
+        <div class="section-hd">
+          複製 Sets
+          {% set err_sets = dell_me.sets | selectattr('status', 'equalto', 'error') | list %}
+          {% if err_sets %}
+            <span class="c-err">/ {{ err_sets|length }} 異常</span>
+          {% else %}
+            <span class="c-ok">/ 全部正常</span>
+          {% endif %}
+        </div>
+        {% for rs in dell_me.sets %}
+        <div class="job-row">
+          {% if rs.active %}
+            <span class="c-accent" title="複製中">🔄</span>
+          {% elif rs.status == 'ok' %}
+            <span class="c-ok">✅</span>
+          {% else %}
+            <span class="c-err">❌</span>
+          {% endif %}
+          <span class="job-name">{{ rs.name }}</span>
+          <span class="job-ts">
+            {% if rs.hours_ago is not none %}
+              {{ rs.last }}
+              {% if rs.hours_ago > 24 %}<span class="c-err"> ({{ rs.hours_ago }}h前)</span>
+              {% elif rs.hours_ago > 12 %}<span class="c-warn"> ({{ rs.hours_ago }}h前)</span>
+              {% endif %}
+            {% else %}—{% endif %}
+          </span>
+        </div>
+        {% endfor %}
+
+      </div>
+    </div>
+  </div>
+  {% elif dell_me.get('error') %}
+  <div class="col-12 col-md-6 col-xl-4">
+    <div class="sys-card">
+      <div class="sys-header">
+        <span class="dot dot-error"></span>
+        <div><div class="sys-title">Dell ME 複製</div></div>
+      </div>
+      <div class="sys-body">
+        <span class="c-err small">❌ 連線失敗：{{ dell_me.error }}</span>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- 無資料 -->
+  {% if not ppdm and not synology and not dell_me %}
+  <div class="col-12 text-center py-5 c-muted">
+    {% if loading %}<span class="spin"></span> 載入中…
+    {% else %}無資料，請按更新{% endif %}
+  </div>
+  {% endif %}
+
+</div>
+</div>
+
+<script>
+{% if loading %}
+const _lastUpdated = null;
+setInterval(() => {
+  fetch('/api/data').then(r => r.json()).then(d => {
+    if (!d.backup_loading) location.reload();
+  });
+}, 3000);
+{% endif %}
+</script>
+</body>
+</html>
