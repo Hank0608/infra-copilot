@@ -1,0 +1,18 @@
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# Claude Code 本機設定（個人專屬，不分享）
+.claude/
+
+# logs
+*.log
