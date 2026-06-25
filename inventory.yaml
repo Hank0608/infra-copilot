@@ -24,6 +24,14 @@ nodes:
       nginx_access_log: /var/log/nginx/access.log
       nginx_error_log: /var/log/nginx/error.log
 
+  mcp-vm:
+    label: mcp-vm
+    role: mcp_server
+    ip: "10.11.1.247"
+    ssh_auth: env
+    ssh_user_env: MCP_VM_USER
+    ssh_pass_env: MCP_VM_PASS
+
   # ── K8s ───────────────────────────────────────────────
   k8s-ingress:
     label: k8s-ingress

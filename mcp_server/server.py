@@ -216,4 +216,13 @@ if __name__ == "__main__":
 
     # 本機開發用 stdio，部署到 VM 後改用 streamable-http（見 MCP_SERVER_PLAN.md Phase 3）
     transport = os.getenv("MCP_TRANSPORT", "stdio")
+    if transport == "streamable-http":
+        mcp.settings.host = "0.0.0.0"
+        mcp.settings.port = int(os.getenv("MCP_PORT", "8000"))
+        # FastMCP 預設只允許 Host: localhost/127.0.0.1（DNS rebinding 防護），
+        # 部署機要用 IP 連線，得把實際 host:port 加進白名單
+        allowed_host = os.getenv("MCP_ALLOWED_HOST")
+        if allowed_host:
+            mcp.settings.transport_security.allowed_hosts.append(allowed_host)
+            mcp.settings.transport_security.allowed_origins.append(f"http://{allowed_host}")
     mcp.run(transport=transport)

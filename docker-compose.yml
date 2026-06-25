@@ -1,0 +1,13 @@
+services:
+  mcp-server:
+    build: .
+    image: infra-copilot-mcp:latest
+    container_name: infra-copilot-mcp
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - MCP_TRANSPORT=streamable-http
+      - MCP_ALLOWED_HOST=${MCP_VM_HOST}:8000
