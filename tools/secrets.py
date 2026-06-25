@@ -8,12 +8,15 @@ ROOT = Path(__file__).parent.parent
 load_dotenv(ROOT / ".env")
 
 _SERVICE = "infra-copilot"
-_PASS_KEYS = {"RP_PASS", "AD_PASS", "FW_PASS", "ZABBIX_PASS", "WAZUH_PASS", "PPDM_PASS", "SYNOLOGY_PASS", "LDAP_SVC_PASS", "TEAMS_WEBHOOK_URL", "SMTP_PASS"}
+_PASS_KEYS = {"RP_PASS", "AD_PASS", "FW_PASS", "ZABBIX_PASS", "WAZUH_PASS", "PPDM_PASS", "SYNOLOGY_PASS", "LDAP_SVC_PASS", "TEAMS_WEBHOOK_URL", "SMTP_PASS", "MCP_VM_PASS"}
+
+# 這些服務都用 infra.ro 帳號，密碼相同，set-all 時合併成一次輸入
+_INFRA_RO_KEYS = ["AD_PASS", "LDAP_SVC_PASS", "ZABBIX_PASS", "WAZUH_PASS", "SYNOLOGY_PASS", "PPDM_PASS", "FW_PASS", "SMTP_PASS", "RP_PASS"]
 
 # 顯示順序（方便 status / set-all 時對照用途）
 _KEY_ORDER = [
-    ("LDAP_SVC_PASS",    "LDAP service account (infra_ldap) — vSphere / Dell ME / SSH"),
-    ("AD_PASS",          "AD 管理帳號密碼 (hank_lin@uti.com)"),
+    ("LDAP_SVC_PASS",    "LDAP service account (infra_ldap，與 infra.ro 同密碼) — vSphere / Dell ME / SSH"),
+    ("AD_PASS",          "AD 管理帳號密碼（infra.ro）"),
     ("ZABBIX_PASS",      "Zabbix API token / 密碼"),
     ("WAZUH_PASS",       "Wazuh API 密碼"),
     ("PPDM_PASS",        "PPDM API 密碼"),
@@ -21,7 +24,8 @@ _KEY_ORDER = [
     ("FW_PASS",          "FortiGate 密碼"),
     ("TEAMS_WEBHOOK_URL","Teams Webhook URL"),
     ("SMTP_PASS",        "SMTP 密碼（若有）"),
-    ("RP_PASS",          "Reverse proxy / 其他"),
+    ("RP_PASS",          "Reverse proxy（infra.ro）"),
+    ("MCP_VM_PASS",      "MCP Server VM (10.200.80.39) SSH 密碼 — ubiqconn"),
 ]
 
 
@@ -92,7 +96,16 @@ def _cmd_set(key: str):
 def _cmd_set_all():
     import getpass
     s = status()
+
+    shared = getpass.getpass(f"infra.ro 帳號密碼（套用到 {', '.join(_INFRA_RO_KEYS)}，Enter 跳過）: ")
+    if shared.strip():
+        for key in _INFRA_RO_KEYS:
+            set_secret(key, shared)
+            print(f"  {key} 已儲存")
+
     for key, desc in _KEY_ORDER:
+        if key in _INFRA_RO_KEYS:
+            continue
         current = "OK" if s.get(key) else "MISSING"
         val = getpass.getpass(f"[{current}] {key} ({desc}): ")
         if not val.strip():
