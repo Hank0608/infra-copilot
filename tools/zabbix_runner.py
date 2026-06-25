@@ -312,6 +312,114 @@ def get_host_availability(token: str) -> dict:
     return {"total": len(hosts), "up": up, "down": down, "unknown": unknown}
 
 
+# ── Web scenario 監控 ─────────────────────────────────────
+
+def get_web_scenarios(hostname: str, token: str = None) -> list:
+    """
+    查詢指定 host 底下所有 Web scenario 的設定與目前狀態。
+    回傳 [{name, enabled, delay, steps: [{name, url, timeout, required,
+           status_codes, last_rspcode, last_time}],
+           last_fail, last_error, last_clock}]
+    last_fail: 0 = 正常，非 0 = 第幾步失敗；None = 尚無資料。
+    """
+    own = token is None
+    if own:
+        token = login()
+    try:
+        host = find_host(hostname, token)
+        if not host:
+            raise ValueError(f"找不到 host: {hostname}")
+
+        scenarios = _call("httptest.get", {
+            "hostids":     [host["hostid"]],
+            "output":      ["httptestid", "name", "delay", "status", "retries"],
+            "selectSteps": ["name", "no", "url", "timeout", "required", "status_codes"],
+        }, token)
+        if not scenarios:
+            return []
+
+        items = _call("item.get", {
+            "hostids":  [host["hostid"]],
+            "webitems": True,
+            "search":   {"key_": "web.test."},
+            "output":   ["key_", "lastvalue", "lastclock"],
+        }, token)
+        item_by_key = {i["key_"]: i for i in items}
+
+        def _last(key):
+            """key 完全比對；用於 fail/error（無額外參數）。"""
+            i = item_by_key.get(key)
+            return i["lastvalue"] if i and i["lastvalue"] != "" else None
+
+        def _last_prefix(prefix):
+            """前綴比對；rspcode/time 的 key 可能帶第三個參數（如 ,resp]）。"""
+            for i in items:
+                if i["key_"].startswith(prefix) and i["lastvalue"] != "":
+                    return i["lastvalue"]
+            return None
+
+        result = []
+        for sc in scenarios:
+            name = sc["name"]
+            steps = []
+            for st in sorted(sc.get("steps", []), key=lambda s: int(s["no"])):
+                steps.append({
+                    "name":         st["name"],
+                    "url":          st["url"],
+                    "timeout":      st["timeout"],
+                    "required":     st.get("required") or None,
+                    "status_codes": st.get("status_codes") or None,
+                    "last_rspcode": _last_prefix(f"web.test.rspcode[{name},{st['name']}"),
+                    "last_time":    _last_prefix(f"web.test.time[{name},{st['name']}"),
+                })
+
+            fail_item = item_by_key.get(f"web.test.fail[{name}]")
+            result.append({
+                "name":       name,
+                "enabled":    sc["status"] == "0",
+                "delay":      sc["delay"],
+                "retries":    sc.get("retries"),
+                "steps":      steps,
+                "last_fail":  int(fail_item["lastvalue"]) if fail_item and fail_item["lastvalue"] != "" else None,
+                "last_error": _last(f"web.test.error[{name}]"),
+                "last_clock": (datetime.fromtimestamp(int(fail_item["lastclock"]), tz=_TZ8)
+                               .strftime("%Y-%m-%d %H:%M")
+                               if fail_item and fail_item.get("lastclock") not in (None, "0") else None),
+            })
+        return result
+    finally:
+        if own:
+            logout(token)
+
+
+def web_scenario_report(hostname: str) -> str:
+    """格式化的 Web scenario 設定與現況報告。"""
+    scenarios = get_web_scenarios(hostname)
+    lines = ["=" * 60, f"  Web Scenario — {hostname}", "=" * 60]
+
+    if not scenarios:
+        lines.append("\n  (此 host 沒有設定 Web scenario)")
+        return "\n".join(lines)
+
+    for sc in scenarios:
+        state = "啟用" if sc["enabled"] else "停用"
+        fail = sc["last_fail"]
+        if fail is None:
+            health = "❓ 尚無資料"
+        elif fail == 0:
+            health = "✅ 正常"
+        else:
+            health = f"🔴 失敗（第 {fail} 步，{sc['last_error'] or '無錯誤訊息'}）"
+        lines.append(f"\n=== {sc['name']} ({state}, 間隔 {sc['delay']}) ===")
+        lines.append(f"狀態: {health}" + (f"　最後檢查: {sc['last_clock']}" if sc["last_clock"] else ""))
+        for st in sc["steps"]:
+            lines.append(f"  • {st['name']}: {st['url']}")
+            lines.append(f"      timeout={st['timeout']}  required={st['required']}  status_codes={st['status_codes']}")
+            lines.append(f"      最後 rspcode={st['last_rspcode']}  最後 time={st['last_time']}")
+    lines.append("\n" + "=" * 60)
+    return "\n".join(lines)
+
+
 # ── 磁碟成長分析 ──────────────────────────────────────────
 
 _TZ8 = timezone(timedelta(hours=8))
@@ -380,14 +488,22 @@ def get_trends(hostname: str, item_search: str, days: int = 90, token: str = Non
 
 
 def find_host(name: str, token: str = None) -> dict:
-    """模糊比對 host name，回 {hostid, host, name}；找不到回 None。"""
+    """
+    比對 host name，回 {hostid, host, name}；找不到回 None。
+    優先回傳完全比對（不分大小寫）的結果；若名稱剛好是別的 host 名稱的子字串
+    （例如 "BI" 也會模糊比對到 "Zabbix server"、"BI-clone"），避免誤拿錯的 host。
+    完全比對不到時，才退回模糊比對的第一筆。
+    """
     own = token is None
     if own:
         token = login()
     try:
         hosts = _call("host.get", {"search": {"name": name},
                                     "output": ["hostid", "host", "name"]}, token)
-        return hosts[0] if hosts else None
+        if not hosts:
+            return None
+        exact = [h for h in hosts if h["name"].lower() == name.lower()]
+        return exact[0] if exact else hosts[0]
     finally:
         if own:
             logout(token)
@@ -584,6 +700,11 @@ if __name__ == "__main__":
         host = sys.argv[2]
         days = int(sys.argv[3]) if len(sys.argv) > 3 else 90
         print(disk_growth_report(host, days))
+    elif cmd == "web":
+        if len(sys.argv) < 3:
+            print("Usage: zabbix_runner.py web <hostname>")
+            sys.exit(1)
+        print(web_scenario_report(sys.argv[2]))
     else:
-        print(f"Usage: zabbix_runner.py [report | disk <host> [days]]")
+        print(f"Usage: zabbix_runner.py [report | disk <host> [days] | web <host>]")
         sys.exit(1)
