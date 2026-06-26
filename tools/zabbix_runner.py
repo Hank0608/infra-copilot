@@ -139,6 +139,17 @@ def logout(token: str):
     _call("user.logout", {}, token)
 
 
+def _host_status(ifaces: list, active_available: str = None) -> tuple[str, str]:
+    """依 interface availability 判斷 host 狀態，回傳 (status, error)。"""
+    avail_vals = [i["available"] for i in ifaces]
+    if "2" in avail_vals:
+        error = next((i.get("error", "") for i in ifaces if i["available"] == "2"), "")
+        return "down", error
+    if "1" in avail_vals or active_available == "1":
+        return "up", ""
+    return "unknown", ""
+
+
 def get_problems(token: str, min_severity: int = 2, days: int = 30) -> list:
     problems = _call("problem.get", {
         "output": ["eventid", "name", "severity", "clock", "acknowledged", "objectid"],
@@ -189,16 +200,8 @@ def get_all_host_data(token: str) -> dict:
     by_ip:   dict = {}
 
     for h in hosts:
-        ifaces     = h.get("interfaces", [])
-        avail_vals = [i["available"] for i in ifaces]
-
-        if "2" in avail_vals:
-            status = "down"
-            error  = next((i.get("error", "") for i in ifaces if i["available"] == "2"), "")
-        elif "1" in avail_vals or h.get("active_available") == "1":
-            status, error = "up", ""
-        else:
-            status, error = "unknown", ""
+        ifaces = h.get("interfaces", [])
+        status, error = _host_status(ifaces, h.get("active_available"))
 
         record = {
             "hostid":   h["hostid"],
@@ -234,15 +237,8 @@ def get_host_detail(host_name: str, token: str) -> dict:
     host   = hosts[0]
     hostid = host["hostid"]
 
-    ifaces     = host.get("interfaces", [])
-    avail_vals = [i["available"] for i in ifaces]
-    if "2" in avail_vals:
-        status = "down"
-        error  = next((i.get("error", "") for i in ifaces if i["available"] == "2"), "")
-    elif "1" in avail_vals or host.get("active_available") == "1":
-        status, error = "up", ""
-    else:
-        status, error = "unknown", ""
+    ifaces = host.get("interfaces", [])
+    status, error = _host_status(ifaces, host.get("active_available"))
 
     problems_raw = _call("problem.get", {
         "output":    ["eventid", "name", "severity", "clock", "acknowledged"],
@@ -297,14 +293,11 @@ def get_host_availability(token: str) -> dict:
 
     up, down, unknown = [], [], []
     for h in hosts:
-        ifaces = h.get("interfaces", [])
-        avail_vals = [i["available"] for i in ifaces] if ifaces else []
-
-        if "2" in avail_vals:
-            err = next((i["error"] for i in ifaces if i["available"] == "2" and i.get("error")), "")
-            h["_error"] = err
+        status, error = _host_status(h.get("interfaces", []), h.get("active_available"))
+        if status == "down":
+            h["_error"] = error
             down.append(h)
-        elif "1" in avail_vals or h.get("active_available") == "1":
+        elif status == "up":
             up.append(h)
         else:
             unknown.append(h)

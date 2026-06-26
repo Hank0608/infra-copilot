@@ -6,6 +6,7 @@ import ssl
 import urllib.request
 import urllib.parse
 import urllib.error
+from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from dotenv import load_dotenv
@@ -47,6 +48,16 @@ def logout(token: str):
         urllib.request.urlopen(req, context=_CTX, timeout=5)
     except Exception:
         pass
+
+
+@contextmanager
+def _token():
+    """建立 PPDM 連線，離開 with 區塊時自動 logout（含例外狀況）。"""
+    token = login()
+    try:
+        yield token
+    finally:
+        logout(token)
 
 
 def _get(token: str, path: str, params: dict = None) -> dict:
@@ -250,15 +261,12 @@ def get_alerts(token: str, severity: str = None, limit: int = 50) -> list:
 
 def backup_report(hours: int = 24) -> str:
     """備份健康日報（文字版）。"""
-    token = login()
-    try:
-        summary    = get_backup_summary(token, hours)
-        jobs       = get_recent_jobs(token, hours)
-        storage    = get_storage(token)
-        alerts     = get_alerts(token, limit=50)
+    with _token() as token:
+        summary     = get_backup_summary(token, hours)
+        jobs        = get_recent_jobs(token, hours)
+        storage     = get_storage(token)
+        alerts      = get_alerts(token, limit=50)
         unprotected = get_unprotected_assets(token)
-    finally:
-        logout(token)
 
     lines = ["=" * 55, "  PPDM 備份健康報告", "=" * 55]
 
@@ -321,15 +329,12 @@ def get_dashboard_card(hours: int = 24) -> dict:
     {status, summary, failed_jobs, storage, alerts}
     status: ok / warn / error
     """
-    token = login()
-    try:
-        summary      = get_backup_summary(token, hours)
-        all_jobs     = get_recent_jobs(token, hours)
-        storage      = get_storage(token)
-        crit_alerts  = get_alerts(token, severity="CRITICAL", limit=20)
-        warn_alerts  = get_alerts(token, severity="WARNING",  limit=20)
-    finally:
-        logout(token)
+    with _token() as token:
+        summary     = get_backup_summary(token, hours)
+        all_jobs    = get_recent_jobs(token, hours)
+        storage     = get_storage(token)
+        crit_alerts = get_alerts(token, severity="CRITICAL", limit=20)
+        warn_alerts = get_alerts(token, severity="WARNING",  limit=20)
 
     failed_jobs = [
         {
@@ -373,20 +378,17 @@ def get_detail(hours: int = 24) -> dict:
     {summary, failed_jobs, warn_jobs, all_jobs, storage, crit_alerts, warn_alerts,
      unprotected, search_cluster, hours}
     """
-    token = login()
-    try:
-        summary        = get_backup_summary(token, hours)
-        all_jobs       = get_recent_jobs(token, hours)
-        storage        = get_storage(token)
-        crit_alerts    = get_alerts(token, severity="CRITICAL", limit=30)
-        warn_alerts    = get_alerts(token, severity="WARNING",  limit=30)
-        unprotected    = get_unprotected_assets(token)
+    with _token() as token:
+        summary     = get_backup_summary(token, hours)
+        all_jobs    = get_recent_jobs(token, hours)
+        storage     = get_storage(token)
+        crit_alerts = get_alerts(token, severity="CRITICAL", limit=30)
+        warn_alerts = get_alerts(token, severity="WARNING",  limit=30)
+        unprotected = get_unprotected_assets(token)
         try:
             search_cluster = get_search_cluster_status(token)
         except Exception:
             search_cluster = None
-    finally:
-        logout(token)
 
     def _fmt_job(j):
         res = j.get("result") or {}
@@ -415,38 +417,37 @@ def get_detail(hours: int = 24) -> dict:
 
 if __name__ == "__main__":
     import sys
-    token = login()
-    cmd   = sys.argv[1] if len(sys.argv) > 1 else "report"
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "report"
 
     if cmd == "report":
-        logout(token)
         print(backup_report())
     elif cmd == "jobs":
         hours = int(sys.argv[2]) if len(sys.argv) > 2 else 24
-        jobs  = get_recent_jobs(token, hours)
+        with _token() as token:
+            jobs = get_recent_jobs(token, hours)
         for j in jobs:
             s    = (j.get("result") or {}).get("status", "?")
             icon = STATUS_EMOJI.get(s, "?")
             t    = str(j.get("endTime", ""))[:16].replace("T", " ")
             print(f"{icon} {j.get('name','')[:60]:<60} {t}")
-        logout(token)
     elif cmd == "failed":
-        jobs = get_failed_jobs(token)
+        with _token() as token:
+            jobs = get_failed_jobs(token)
         for j in jobs:
             t = str(j.get("endTime", ""))[:16].replace("T", " ")
             print(f"❌ {t}  {j.get('name','')}")
-        logout(token)
     elif cmd == "storage":
-        for s in get_storage(token):
+        with _token() as token:
+            storage = get_storage(token)
+        for s in storage:
             print(f"{s['name']} ({s['type']})  util={s['utilization']}%  "
                   f"{s.get('used_tb',0):.1f}TB/{s.get('total_tb',0):.1f}TB  "
                   f"compression={s.get('compression',0):.1f}x")
-        logout(token)
     elif cmd == "alerts":
-        for a in get_alerts(token):
+        with _token() as token:
+            alerts = get_alerts(token)
+        for a in alerts:
             icon = SEVERITY_EMOJI.get(a.get("severity",""), "?")
             print(f"{icon} {a.get('message','')[:80]}")
-        logout(token)
     else:
-        logout(token)
         print(f"Unknown command: {cmd}")

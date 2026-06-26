@@ -7,6 +7,7 @@ import urllib.request
 import urllib.parse
 import yaml
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
@@ -47,18 +48,21 @@ def _post(params: dict) -> dict:
 
 
 def login() -> str:
-    r = _post({"api": "SYNO.API.Auth", "method": "login", "version": "7",
-                "account": SYNO_USER, "passwd": SYNO_PASS})
-    if not r.get("success"):
-        raise RuntimeError(f"Synology login failed: code={r.get('error',{}).get('code')}")
-    return r["data"]["sid"]
+    return login_host(SYNO_HOST)
 
 
 def logout(sid: str):
+    logout_host(SYNO_HOST, sid)
+
+
+@contextmanager
+def _session():
+    """建立主機 DSM 連線，離開 with 區塊時自動 logout（含例外狀況）。"""
+    sid = login()
     try:
-        _post({"api": "SYNO.API.Auth", "method": "logout", "version": "1", "_sid": sid})
-    except Exception:
-        pass
+        yield sid
+    finally:
+        logout(sid)
 
 
 # ── 多主機通用底層 ─────────────────────────────────────────
@@ -437,12 +441,9 @@ def _status_icon(st: Optional[int]) -> str:
 
 
 def backup_report() -> str:
-    sid = login()
-    try:
+    with _session() as sid:
         backups = get_backup_status(sid)
         cameras = get_cameras(sid)
-    finally:
-        logout(sid)
 
     lines = ["=" * 55, "  Synology ABB 備份 / 監視器報告", "=" * 55]
 
@@ -493,22 +494,16 @@ if __name__ == "__main__":
         print(backup_report())
 
     elif cmd == "tasks":
-        sid = login()
-        try:
+        with _session() as sid:
             backups = get_backup_status(sid)
-        finally:
-            logout(sid)
         for b in backups:
             icon = _status_icon(b["last_status"])
             ns   = _fmt_dt(b["next_time"], "停用")
             print(f"{icon} [{b['task_id']:2d}] {b['name'][:30]:30s}  最後:{_fmt_dt(b['last_time'])}  下次:{ns}")
 
     elif cmd == "cameras":
-        sid = login()
-        try:
+        with _session() as sid:
             cameras = get_cameras(sid)
-        finally:
-            logout(sid)
         for c in cameras:
             st   = c.get("status", -1)
             icon = "✅" if st == 1 else "❌"

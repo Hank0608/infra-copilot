@@ -1,8 +1,10 @@
 """Active Directory LDAP client — 組織架構、帳號狀態、密碼到期查詢。"""
 
 import os
+import re
 import ssl
 import datetime
+from contextlib import contextmanager
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -39,6 +41,16 @@ def _connect():
                       authentication=NTLM,
                       auto_bind=True)
     return conn
+
+
+@contextmanager
+def _connection():
+    """建立 LDAP 連線，離開 with 區塊時自動 unbind（含例外狀況）。"""
+    conn = _connect()
+    try:
+        yield conn
+    finally:
+        conn.unbind()
 
 
 def _cn(dn: str) -> str:
@@ -88,179 +100,171 @@ def _fetch_max_pwd_days(conn) -> int:
 def get_user(username: str) -> dict:
     """查詢單一使用者詳細資訊。"""
     from ldap3 import SUBTREE
-    conn = _connect()
-    _fetch_max_pwd_days(conn)
-    conn.search(
-        BASE_DN,
-        f"(&(objectClass=user)(objectCategory=person)(sAMAccountName={username}))",
-        search_scope=SUBTREE,
-        attributes=[
-            "sAMAccountName", "displayName", "department", "title",
-            "manager", "mail", "telephoneNumber",
-            "pwdLastSet", "userAccountControl", "memberOf", "whenCreated",
-        ],
-    )
-    if not conn.entries:
-        conn.unbind()
-        return None
-    e = conn.entries[0]
-    uac = int(e.userAccountControl.value or 0)
-    expiry = _pwd_expiry(
-        e.pwdLastSet.value.replace(tzinfo=None) if e.pwdLastSet.value else None,
-        uac,
-    )
-    result = {
-        "username":    str(e.sAMAccountName),
-        "displayName": str(e.displayName),
-        "department":  str(e.department),
-        "title":       str(e.title),
-        "manager":     _cn(str(e.manager)),
-        "mail":        str(e.mail),
-        "phone":       str(e.telephoneNumber),
-        "groups":      [_cn(str(m)) for m in e.memberOf.values],
-        "pwdExpiry":   expiry,
-        "daysLeft":    _days_until(expiry),
-        "disabled":    bool(uac & _UAC_DISABLED),
-        "locked":      bool(uac & _UAC_LOCKED),
-        "noExpire":    bool(uac & _UAC_DONT_EXPIRE_PASS),
-        "created":     str(e.whenCreated.value)[:10] if e.whenCreated.value else "",
-    }
-    conn.unbind()
-    return result
-
-
-def search_users(keyword: str, max_results: int = 20) -> list:
-    """依姓名或部門關鍵字搜尋使用者（回傳摘要）。"""
-    from ldap3 import SUBTREE
-    conn = _connect()
-    _fetch_max_pwd_days(conn)
-    filt = (
-        f"(&(objectClass=user)(objectCategory=person)"
-        f"(|(displayName=*{keyword}*)(department=*{keyword}*)(sAMAccountName=*{keyword}*)))"
-    )
-    conn.search(
-        BASE_DN, filt, search_scope=SUBTREE,
-        attributes=["sAMAccountName", "displayName", "department", "title", "userAccountControl"],
-        size_limit=max_results,
-    )
-    results = []
-    for e in conn.entries:
-        uac = int(e.userAccountControl.value or 0)
-        results.append({
-            "username":    str(e.sAMAccountName),
-            "displayName": str(e.displayName),
-            "department":  str(e.department),
-            "title":       str(e.title),
-            "disabled":    bool(uac & _UAC_DISABLED),
-        })
-    conn.unbind()
-    return results
-
-
-def get_expiring_passwords(days: int = 14) -> list:
-    """找出密碼將在 N 天內到期（或已到期）的帳號。"""
-    from ldap3 import SUBTREE
-    conn = _connect()
-    _fetch_max_pwd_days(conn)
-    conn.search(
-        BASE_DN,
-        # 排除停用帳號、電腦帳號（name 含 $）
-        "(&(objectClass=user)(objectCategory=person)"
-        "(!(userAccountControl:1.2.840.113556.1.4.803:=2))"
-        "(!(sAMAccountName=*$)))",
-        search_scope=SUBTREE,
-        attributes=["sAMAccountName", "displayName", "department", "pwdLastSet", "userAccountControl"],
-        size_limit=500,
-    )
-    expiring = []
-    for e in conn.entries:
-        uac = int(e.userAccountControl.value or 0)
-        if uac & _UAC_DONT_EXPIRE_PASS:
-            continue
-        pwd_set = e.pwdLastSet.value
-        if pwd_set:
-            pwd_set = pwd_set.replace(tzinfo=None)
-        expiry = _pwd_expiry(pwd_set, uac)
-        left   = _days_until(expiry)
-        if left is not None and left <= days:
-            expiring.append({
-                "username":    str(e.sAMAccountName),
-                "displayName": str(e.displayName),
-                "department":  str(e.department),
-                "pwdExpiry":   expiry,
-                "daysLeft":    left,
-            })
-    conn.unbind()
-    expiring.sort(key=lambda x: x["daysLeft"])
-    return expiring
-
-
-def get_group_members(group_name: str) -> list:
-    """列出群組成員（僅直接成員，不含巢狀）。"""
-    from ldap3 import SUBTREE
-    conn = _connect()
-    # 先找群組 DN
-    conn.search(
-        BASE_DN,
-        f"(&(objectClass=group)(cn={group_name}))",
-        attributes=["member"],
-    )
-    if not conn.entries:
-        conn.unbind()
-        return []
-    member_dns = conn.entries[0].member.values
-
-    members = []
-    for dn in member_dns:
+    with _connection() as conn:
+        _fetch_max_pwd_days(conn)
         conn.search(
-            str(dn), "(objectClass=user)",
-            attributes=["sAMAccountName", "displayName", "department", "title"],
+            BASE_DN,
+            f"(&(objectClass=user)(objectCategory=person)(sAMAccountName={username}))",
+            search_scope=SUBTREE,
+            attributes=[
+                "sAMAccountName", "displayName", "department", "title",
+                "manager", "mail", "telephoneNumber",
+                "pwdLastSet", "userAccountControl", "memberOf", "whenCreated",
+            ],
         )
-        if conn.entries:
-            e = conn.entries[0]
-            members.append({
-                "username":    str(e.sAMAccountName),
-                "displayName": str(e.displayName),
-                "department":  str(e.department),
-                "title":       str(e.title),
-            })
-    conn.unbind()
-    return members
-
-
-def get_department_users(department: str) -> list:
-    """列出某部門所有啟用帳號。"""
-    from ldap3 import SUBTREE
-    conn = _connect()
-    _fetch_max_pwd_days(conn)
-    conn.search(
-        BASE_DN,
-        f"(&(objectClass=user)(objectCategory=person)(department=*{department}*))",
-        search_scope=SUBTREE,
-        attributes=["sAMAccountName", "displayName", "department", "title",
-                    "manager", "mail", "pwdLastSet", "userAccountControl"],
-    )
-    results = []
-    for e in conn.entries:
+        if not conn.entries:
+            return None
+        e = conn.entries[0]
         uac = int(e.userAccountControl.value or 0)
-        pwd_set = e.pwdLastSet.value
-        if pwd_set:
-            pwd_set = pwd_set.replace(tzinfo=None)
-        expiry = _pwd_expiry(pwd_set, uac)
-        results.append({
+        expiry = _pwd_expiry(
+            e.pwdLastSet.value.replace(tzinfo=None) if e.pwdLastSet.value else None,
+            uac,
+        )
+        return {
             "username":    str(e.sAMAccountName),
             "displayName": str(e.displayName),
             "department":  str(e.department),
             "title":       str(e.title),
             "manager":     _cn(str(e.manager)),
             "mail":        str(e.mail),
+            "phone":       str(e.telephoneNumber),
+            "groups":      [_cn(str(m)) for m in e.memberOf.values],
             "pwdExpiry":   expiry,
             "daysLeft":    _days_until(expiry),
             "disabled":    bool(uac & _UAC_DISABLED),
-        })
-    conn.unbind()
-    results.sort(key=lambda x: x["disabled"])
-    return results
+            "locked":      bool(uac & _UAC_LOCKED),
+            "noExpire":    bool(uac & _UAC_DONT_EXPIRE_PASS),
+            "created":     str(e.whenCreated.value)[:10] if e.whenCreated.value else "",
+        }
+
+
+def search_users(keyword: str, max_results: int = 20) -> list:
+    """依姓名或部門關鍵字搜尋使用者（回傳摘要）。"""
+    from ldap3 import SUBTREE
+    with _connection() as conn:
+        _fetch_max_pwd_days(conn)
+        filt = (
+            f"(&(objectClass=user)(objectCategory=person)"
+            f"(|(displayName=*{keyword}*)(department=*{keyword}*)(sAMAccountName=*{keyword}*)))"
+        )
+        conn.search(
+            BASE_DN, filt, search_scope=SUBTREE,
+            attributes=["sAMAccountName", "displayName", "department", "title", "userAccountControl"],
+            size_limit=max_results,
+        )
+        results = []
+        for e in conn.entries:
+            uac = int(e.userAccountControl.value or 0)
+            results.append({
+                "username":    str(e.sAMAccountName),
+                "displayName": str(e.displayName),
+                "department":  str(e.department),
+                "title":       str(e.title),
+                "disabled":    bool(uac & _UAC_DISABLED),
+            })
+        return results
+
+
+def get_expiring_passwords(days: int = 14) -> list:
+    """找出密碼將在 N 天內到期（或已到期）的帳號。"""
+    from ldap3 import SUBTREE
+    with _connection() as conn:
+        _fetch_max_pwd_days(conn)
+        conn.search(
+            BASE_DN,
+            # 排除停用帳號、電腦帳號（name 含 $）
+            "(&(objectClass=user)(objectCategory=person)"
+            "(!(userAccountControl:1.2.840.113556.1.4.803:=2))"
+            "(!(sAMAccountName=*$)))",
+            search_scope=SUBTREE,
+            attributes=["sAMAccountName", "displayName", "department", "pwdLastSet", "userAccountControl"],
+            size_limit=500,
+        )
+        expiring = []
+        for e in conn.entries:
+            uac = int(e.userAccountControl.value or 0)
+            if uac & _UAC_DONT_EXPIRE_PASS:
+                continue
+            pwd_set = e.pwdLastSet.value
+            if pwd_set:
+                pwd_set = pwd_set.replace(tzinfo=None)
+            expiry = _pwd_expiry(pwd_set, uac)
+            left   = _days_until(expiry)
+            if left is not None and left <= days:
+                expiring.append({
+                    "username":    str(e.sAMAccountName),
+                    "displayName": str(e.displayName),
+                    "department":  str(e.department),
+                    "pwdExpiry":   expiry,
+                    "daysLeft":    left,
+                })
+        expiring.sort(key=lambda x: x["daysLeft"])
+        return expiring
+
+
+def get_group_members(group_name: str) -> list:
+    """列出群組成員（僅直接成員，不含巢狀）。"""
+    from ldap3 import SUBTREE
+    with _connection() as conn:
+        # 先找群組 DN
+        conn.search(
+            BASE_DN,
+            f"(&(objectClass=group)(cn={group_name}))",
+            attributes=["member"],
+        )
+        if not conn.entries:
+            return []
+        member_dns = conn.entries[0].member.values
+
+        members = []
+        for dn in member_dns:
+            conn.search(
+                str(dn), "(objectClass=user)",
+                attributes=["sAMAccountName", "displayName", "department", "title"],
+            )
+            if conn.entries:
+                e = conn.entries[0]
+                members.append({
+                    "username":    str(e.sAMAccountName),
+                    "displayName": str(e.displayName),
+                    "department":  str(e.department),
+                    "title":       str(e.title),
+                })
+        return members
+
+
+def get_department_users(department: str) -> list:
+    """列出某部門所有啟用帳號。"""
+    from ldap3 import SUBTREE
+    with _connection() as conn:
+        _fetch_max_pwd_days(conn)
+        conn.search(
+            BASE_DN,
+            f"(&(objectClass=user)(objectCategory=person)(department=*{department}*))",
+            search_scope=SUBTREE,
+            attributes=["sAMAccountName", "displayName", "department", "title",
+                        "manager", "mail", "pwdLastSet", "userAccountControl"],
+        )
+        results = []
+        for e in conn.entries:
+            uac = int(e.userAccountControl.value or 0)
+            pwd_set = e.pwdLastSet.value
+            if pwd_set:
+                pwd_set = pwd_set.replace(tzinfo=None)
+            expiry = _pwd_expiry(pwd_set, uac)
+            results.append({
+                "username":    str(e.sAMAccountName),
+                "displayName": str(e.displayName),
+                "department":  str(e.department),
+                "title":       str(e.title),
+                "manager":     _cn(str(e.manager)),
+                "mail":        str(e.mail),
+                "pwdExpiry":   expiry,
+                "daysLeft":    _days_until(expiry),
+                "disabled":    bool(uac & _UAC_DISABLED),
+            })
+        results.sort(key=lambda x: x["disabled"])
+        return results
 
 
 # ── Alert 類查詢 ───────────────────────────────────────────
@@ -272,34 +276,33 @@ def get_locked_accounts() -> list:
            locked_at, days_locked, bad_pwd_count, high_risk}
     high_risk: disabled=False 且 badPwdCount >= 5
     """
-    conn = _connect()
-    conn.search(
-        BASE_DN,
-        "(&(objectClass=user)(!(objectClass=computer))(lockoutTime>=1))",
-        attributes=["sAMAccountName", "displayName", "department",
-                    "lockoutTime", "badPwdCount", "userAccountControl"],
-    )
-    now = datetime.datetime.now(datetime.timezone.utc)
-    results = []
-    for e in conn.entries:
-        uac      = int(e.userAccountControl.value or 0)
-        disabled = bool(uac & _UAC_DISABLED)
-        lt       = e.lockoutTime.value
-        bad_cnt  = int(e.badPwdCount.value or 0)
-        days_locked = (now - lt).days if lt else 0
-        results.append({
-            "username":    e.sAMAccountName.value,
-            "displayName": e.displayName.value or e.sAMAccountName.value,
-            "department":  (e.department.value or "")[:30],
-            "disabled":    disabled,
-            "locked_at":   lt.strftime("%Y-%m-%d %H:%M") if lt else "",
-            "days_locked": days_locked,
-            "bad_pwd_count": bad_cnt,
-            "high_risk":   not disabled and bad_cnt >= 5,
-        })
-    conn.unbind()
-    results.sort(key=lambda x: (-x["high_risk"], x["disabled"], -x["bad_pwd_count"]))
-    return results
+    with _connection() as conn:
+        conn.search(
+            BASE_DN,
+            "(&(objectClass=user)(!(objectClass=computer))(lockoutTime>=1))",
+            attributes=["sAMAccountName", "displayName", "department",
+                        "lockoutTime", "badPwdCount", "userAccountControl"],
+        )
+        now = datetime.datetime.now(datetime.timezone.utc)
+        results = []
+        for e in conn.entries:
+            uac      = int(e.userAccountControl.value or 0)
+            disabled = bool(uac & _UAC_DISABLED)
+            lt       = e.lockoutTime.value
+            bad_cnt  = int(e.badPwdCount.value or 0)
+            days_locked = (now - lt).days if lt else 0
+            results.append({
+                "username":    e.sAMAccountName.value,
+                "displayName": e.displayName.value or e.sAMAccountName.value,
+                "department":  (e.department.value or "")[:30],
+                "disabled":    disabled,
+                "locked_at":   lt.strftime("%Y-%m-%d %H:%M") if lt else "",
+                "days_locked": days_locked,
+                "bad_pwd_count": bad_cnt,
+                "high_risk":   not disabled and bad_cnt >= 5,
+            })
+        results.sort(key=lambda x: (-x["high_risk"], x["disabled"], -x["bad_pwd_count"]))
+        return results
 
 
 def get_stale_accounts(days: int = 90) -> list:
@@ -307,30 +310,29 @@ def get_stale_accounts(days: int = 90) -> list:
     回傳啟用中但超過 days 天未登入的帳號。
     每筆: {username, displayName, department, last_logon, days_inactive}
     """
-    conn = _connect()
-    conn.search(
-        BASE_DN,
-        "(&(objectClass=user)(!(objectClass=computer))"
-        "(!(userAccountControl:1.2.840.113556.1.4.803:=2))"
-        "(lastLogonTimestamp>=0))",
-        attributes=["sAMAccountName", "displayName", "department", "lastLogonTimestamp"],
-    )
-    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
-    results = []
-    for e in conn.entries:
-        lt = e.lastLogonTimestamp.value
-        if not lt or lt >= cutoff:
-            continue
-        results.append({
-            "username":      e.sAMAccountName.value,
-            "displayName":   e.displayName.value or e.sAMAccountName.value,
-            "department":    (e.department.value or "")[:30],
-            "last_logon":    lt.strftime("%Y-%m-%d"),
-            "days_inactive": (datetime.datetime.now(datetime.timezone.utc) - lt).days,
-        })
-    conn.unbind()
-    results.sort(key=lambda x: -x["days_inactive"])
-    return results
+    with _connection() as conn:
+        conn.search(
+            BASE_DN,
+            "(&(objectClass=user)(!(objectClass=computer))"
+            "(!(userAccountControl:1.2.840.113556.1.4.803:=2))"
+            "(lastLogonTimestamp>=0))",
+            attributes=["sAMAccountName", "displayName", "department", "lastLogonTimestamp"],
+        )
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+        results = []
+        for e in conn.entries:
+            lt = e.lastLogonTimestamp.value
+            if not lt or lt >= cutoff:
+                continue
+            results.append({
+                "username":      e.sAMAccountName.value,
+                "displayName":   e.displayName.value or e.sAMAccountName.value,
+                "department":    (e.department.value or "")[:30],
+                "last_logon":    lt.strftime("%Y-%m-%d"),
+                "days_inactive": (datetime.datetime.now(datetime.timezone.utc) - lt).days,
+            })
+        results.sort(key=lambda x: -x["days_inactive"])
+        return results
 
 
 def get_recent_account_changes(days: int = 7) -> dict:
@@ -339,23 +341,23 @@ def get_recent_account_changes(days: int = 7) -> dict:
     {created: [...], disabled: [...]}
     每筆: {username, displayName, department, changed_at}
     """
-    conn  = _connect()
     since = (datetime.datetime.now(datetime.timezone.utc)
              - datetime.timedelta(days=days)).strftime("%Y%m%d%H%M%S.0Z")
 
-    def _search(filt, attrs):
-        conn.search(BASE_DN, filt, attributes=attrs)
-        return list(conn.entries)
+    with _connection() as conn:
+        def _search(filt, attrs):
+            conn.search(BASE_DN, filt, attributes=attrs)
+            return list(conn.entries)
 
-    created_entries = _search(
-        f"(&(objectClass=user)(!(objectClass=computer))(whenCreated>={since}))",
-        ["sAMAccountName", "displayName", "department", "whenCreated"],
-    )
-    disabled_entries = _search(
-        f"(&(objectClass=user)(!(objectClass=computer))"
-        f"(userAccountControl:1.2.840.113556.1.4.803:=2)(whenChanged>={since}))",
-        ["sAMAccountName", "displayName", "department", "whenChanged"],
-    )
+        created_entries = _search(
+            f"(&(objectClass=user)(!(objectClass=computer))(whenCreated>={since}))",
+            ["sAMAccountName", "displayName", "department", "whenCreated"],
+        )
+        disabled_entries = _search(
+            f"(&(objectClass=user)(!(objectClass=computer))"
+            f"(userAccountControl:1.2.840.113556.1.4.803:=2)(whenChanged>={since}))",
+            ["sAMAccountName", "displayName", "department", "whenChanged"],
+        )
 
     def _fmt(entries, ts_attr):
         out = []
@@ -369,7 +371,6 @@ def get_recent_account_changes(days: int = 7) -> dict:
             })
         return sorted(out, key=lambda x: x["changed_at"], reverse=True)
 
-    conn.unbind()
     return {
         "created":  _fmt(created_entries,  "whenCreated"),
         "disabled": _fmt(disabled_entries, "whenChanged"),
@@ -382,29 +383,28 @@ def get_never_expire_accounts() -> list:
     每筆: {username, displayName, department, pwd_last_set}
     """
     _SKIP = re.compile(r"^(Administrator|MSOL_|krbtgt|aadsync|Guest)", re.I)
-    conn  = _connect()
-    conn.search(
-        BASE_DN,
-        "(&(objectClass=user)(!(objectClass=computer))"
-        "(!(userAccountControl:1.2.840.113556.1.4.803:=2))"
-        "(userAccountControl:1.2.840.113556.1.4.803:=65536))",
-        attributes=["sAMAccountName", "displayName", "department", "pwdLastSet"],
-    )
-    results = []
-    for e in conn.entries:
-        username = e.sAMAccountName.value or ""
-        if _SKIP.match(username):
-            continue
-        pls = e.pwdLastSet.value
-        results.append({
-            "username":     username,
-            "displayName":  e.displayName.value or username,
-            "department":   (e.department.value or "")[:30],
-            "pwd_last_set": pls.strftime("%Y-%m-%d") if pls else "未設定",
-        })
-    conn.unbind()
-    results.sort(key=lambda x: x["username"])
-    return results
+    with _connection() as conn:
+        conn.search(
+            BASE_DN,
+            "(&(objectClass=user)(!(objectClass=computer))"
+            "(!(userAccountControl:1.2.840.113556.1.4.803:=2))"
+            "(userAccountControl:1.2.840.113556.1.4.803:=65536))",
+            attributes=["sAMAccountName", "displayName", "department", "pwdLastSet"],
+        )
+        results = []
+        for e in conn.entries:
+            username = e.sAMAccountName.value or ""
+            if _SKIP.match(username):
+                continue
+            pls = e.pwdLastSet.value
+            results.append({
+                "username":     username,
+                "displayName":  e.displayName.value or username,
+                "department":   (e.department.value or "")[:30],
+                "pwd_last_set": pls.strftime("%Y-%m-%d") if pls else "未設定",
+            })
+        results.sort(key=lambda x: x["username"])
+        return results
 
 
 # ── 報告 ──────────────────────────────────────────────────

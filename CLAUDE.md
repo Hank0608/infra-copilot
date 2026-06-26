@@ -22,18 +22,21 @@ Keychain service 名稱為 `infra-copilot`，所有 key 名稱：
 
 | Key | 用途 |
 |---|---|
-| `ZABBIX_PASS` | Zabbix API 密碼 |
-| `WAZUH_PASS` | Wazuh API 密碼 |
-| `PPDM_PASS` | PPDM API 密碼 |
-| `SYNOLOGY_PASS` | Synology DSM 密碼 |
-| `FW_PASS` | FortiGate 密碼 |
-| `AD_PASS` | AD 管理帳號密碼 (hank_lin@uti.com) |
-| `LDAP_SVC_PASS` | LDAP service account (infra_ldap) |
-| `RP_PASS` | Reverse proxy |
-| `SMTP_PASS` | SMTP 密碼 |
+| `ZABBIX_PASS` | Zabbix API 密碼（infra.ro） |
+| `WAZUH_PASS` | Wazuh API 密碼（infra.ro） |
+| `PPDM_PASS` | PPDM API 密碼（infra.ro） |
+| `SYNOLOGY_PASS` | Synology DSM 密碼（infra.ro） |
+| `FW_PASS` | FortiGate 密碼（infra.ro） |
+| `AD_PASS` | AD 管理帳號密碼（infra.ro） |
+| `LDAP_SVC_PASS` | LDAP service account，帳號 infra_ldap，與 infra.ro 同密碼 — vSphere / Dell ME / SSH |
+| `RP_PASS` | Reverse proxy（rp-main），帳號 infra.ro |
+| `SMTP_PASS` | SSH 到 smtp-server 抓郵件 log 用（帳號 infra.ro），**不是** SMTP AUTH 密碼 — port 25 走 IP 白名單放行、不檢查帳密 |
+| `MCP_VM_PASS` | MCP Server VM (10.200.80.39 / 10.11.1.247) SSH 密碼，帳號 ubiqconn |
 | `TEAMS_WEBHOOK_URL` | Teams Webhook URL |
 
-若讀不到密碼，先問使用者是否更換過密碼、是否需要執行 `python3 -m tools.secrets set KEY` 重新設定，**不要嘗試其他 Keychain 路徑**。
+`ZABBIX_PASS`、`WAZUH_PASS`、`PPDM_PASS`、`SYNOLOGY_PASS`、`FW_PASS`、`AD_PASS`、`LDAP_SVC_PASS`、`SMTP_PASS`、`RP_PASS` 這 9 個 key 都是 infra.ro 帳號、密碼相同，`python3 -m tools.secrets set-all` 時會合併成一次輸入套用到全部。`RP_PASS`／`MCP_VM_PASS` 走 SSH 帳密登入，不是 API。
+
+若讀不到密碼，先問使用者是否更換過密碼、是否需要執行 `python3 -m tools.secrets set KEY` 重新設定，**不要嘗試其他 Keychain 路徑**。若是密碼全部 MISSING，常見原因是 AD 密碼換過、macOS 把舊 login keychain 改名成 `login_renamed_N.keychain-db` 並建了空的新 keychain（`ls ~/Library/Keychains/` 確認），修復方式是 `security set-keychain-password ~/Library/Keychains/login.keychain-db` 把新 keychain 密碼與目前登入密碼同步，再用 `set-all` 補回所有密碼。
 
 環境變數（非敏感設定如 IP、帳號名稱）從 `.env` 讀取，`tools.secrets` 匯入時已自動 `load_dotenv`。
 

@@ -5,6 +5,7 @@ import os
 import urllib.request
 import urllib.parse
 import ssl
+from contextlib import contextmanager
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -73,6 +74,16 @@ def logout(session: dict):
         urllib.request.urlopen(req, context=CTX, timeout=5)
     except Exception:
         pass
+
+
+@contextmanager
+def _session():
+    """建立 FortiGate 連線，離開 with 區塊時自動 logout（含例外狀況）。"""
+    sess = login()
+    try:
+        yield sess
+    finally:
+        logout(sess)
 
 
 # ── 查詢函式 ──────────────────────────────────────────────
@@ -269,8 +280,7 @@ def get_session_config(session: dict) -> dict:
 
 def get_report_data() -> dict:
     """收集日報所需資料：HA 狀態、Firmware、IPsec VPN 隧道。"""
-    sess = login()
-    try:
+    with _session() as sess:
         # HA（順便取 CPU/MEM/uptime）
         ha_raw = _get("monitor/system/ha-statistics", sess).get("results", [])
         ha = []
@@ -286,9 +296,9 @@ def get_report_data() -> dict:
             })
 
         # Firmware
-        fw_raw  = _get("monitor/system/firmware", sess).get("results", {})
-        cur     = fw_raw.get("current", {})
-        avail   = [a.get("version", "") for a in fw_raw.get("available", []) if a.get("version")]
+        fw_raw   = _get("monitor/system/firmware", sess).get("results", {})
+        cur      = fw_raw.get("current", {})
+        avail    = [a.get("version", "") for a in fw_raw.get("available", []) if a.get("version")]
         firmware = {"current": cur.get("version", ""), "available": avail}
 
         # IPsec VPN
@@ -306,28 +316,23 @@ def get_report_data() -> dict:
 
         primary = next((m for m in ha if m["role"] == "primary"), ha[0] if ha else {})
         return {
-            "ha":       ha,
-            "firmware": firmware,
-            "tunnels":  tunnels,
-            "cpu":      primary.get("cpu", 0),
-            "mem":      primary.get("mem", 0),
-            "sessions": primary.get("sessions", 0),
+            "ha":          ha,
+            "firmware":    firmware,
+            "tunnels":     tunnels,
+            "cpu":         primary.get("cpu", 0),
+            "mem":         primary.get("mem", 0),
+            "sessions":    primary.get("sessions", 0),
             "uptime_days": primary.get("uptime_days", 0),
         }
-    finally:
-        logout(sess)
 
 
 # ── 每日報告 ──────────────────────────────────────────────
 
 def daily_report() -> str:
-    sess = login()
-    try:
+    with _session() as sess:
         status = get_system_status(sess)
         ifaces = get_interfaces(sess)
         vips   = get_vips(sess)
-    finally:
-        logout(sess)
 
     lines = ["=" * 55, "  FortiGate 狀態報告", "=" * 55]
 
@@ -370,11 +375,8 @@ if __name__ == "__main__":
         if not ip:
             print("Usage: fortigate_runner.py lookup <ip>")
         else:
-            sess = login()
-            try:
+            with _session() as sess:
                 r = address_lookup(sess, ip)
-            finally:
-                logout(sess)
             print(f"IP: {r['ip']}")
             print(f"Objects : {r['objects']}")
             print(f"Groups  : {r['groups']}")
@@ -385,11 +387,8 @@ if __name__ == "__main__":
         if not src or not dst:
             print("Usage: fortigate_runner.py check <src_ip> <dst_ip>")
         else:
-            sess = login()
-            try:
+            with _session() as sess:
                 r = policy_check(sess, src, dst)
-            finally:
-                logout(sess)
             action_icon = "✅" if r["action"] == "accept" else ("❌" if r["action"] == "deny" else "⬜")
             print(f"{action_icon} {src} → {dst}  action={r['action']}")
             print(f"   src: objects={r['src_objects']}  groups={r['src_groups']}")
@@ -402,11 +401,8 @@ if __name__ == "__main__":
                 print("   (no matching policy — implicit deny)")
 
     elif cmd == "session-config":
-        sess = login()
-        try:
+        with _session() as sess:
             r = get_session_config(sess)
-        finally:
-            logout(sess)
         ttl = r["session_ttl_default"]
         print(f"TCP session idle TTL : {ttl} 秒 ({ttl // 60} 分鐘)")
         print(f"管理介面 timeout     : {r['admintimeout']} 分鐘")

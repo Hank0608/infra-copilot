@@ -39,17 +39,7 @@ _RUN_STATUS = {0: "❌ Failed", 1: "✅ Success", 2: "⚠️ Unknown"}
 
 
 def _ssh_cmd(host: str, cmd: str) -> str:
-    import paramiko
-    user, pw = _HOST_CREDS.get(host, _DEFAULT_CREDS)
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(host, username=user, password=pw,
-                   timeout=15, allow_agent=False, look_for_keys=False)
-    try:
-        _, stdout, _ = client.exec_command(cmd)
-        return stdout.read().decode("utf-8", errors="replace")
-    finally:
-        client.close()
+    return _ssh_batch(host, [cmd])[0]
 
 
 def _get(name: str, text: str) -> str:
@@ -676,12 +666,12 @@ if __name__ == "__main__":
         for c in get_controller_stats(host):
             print(f"  {c['controller']:14s}  CPU={c['cpu_pct']}%  IOPS={c['iops']}"
                   f"  BPS={c['bps']}  WrCache={c['wr_cache_pct']}%"
-                  f"  RdHit={c['rd_hit_pct']:.1f}%  WrHit={c['wr_hit_pct']:.1f}%")
+                  f"  RdHits={c['rd_hits']}  WrHits={c['wr_hits']}")
         print(f"\n=== {host} Volume Stats ===")
         for v in get_volume_stats(host):
             print(f"  {v['volume']:20s}  IOPS={v['iops']}  BPS={v['bps']}"
                   f"  Rd={v['read_rsp_us']//1000}ms  Wr={v['write_rsp_us']//1000}ms"
-                  f"  RdHit={v['rd_hit_pct']:.1f}%  WrHit={v['wr_hit_pct']:.1f}%")
+                  f"  RdHits={v['rd_hits']}  WrHits={v['wr_hits']}")
 
     elif cmd == "dg-stats":
         # disk group latency — 調查 storage 效能問題時優先執行

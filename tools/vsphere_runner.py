@@ -7,6 +7,7 @@ import os
 import ssl
 import sys
 import yaml
+from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from dotenv import load_dotenv
@@ -37,6 +38,16 @@ def _disconnect(si):
     Disconnect(si)
 
 
+@contextmanager
+def _session():
+    """建立 vCenter 連線，離開 with 區塊時自動 disconnect（含例外狀況）。"""
+    si = _connect()
+    try:
+        yield si
+    finally:
+        _disconnect(si)
+
+
 def _all_objects(si, vim_type):
     content = si.RetrieveContent()
     view = content.viewManager.CreateContainerView(content.rootFolder, [vim_type], True)
@@ -46,13 +57,46 @@ def _all_objects(si, vim_type):
         view.Destroy()
 
 
+def _find_host(si, host_ip: str):
+    """依名稱找 ESXi host，找不到回傳 None。"""
+    from pyVmomi import vim
+    for h in _all_objects(si, vim.HostSystem):
+        if h.name == host_ip:
+            return h
+    return None
+
+
+def _cpu_counter_id(pm) -> int:
+    """找 cpu.usage.average perf counter 的 counterId。"""
+    for c in pm.perfCounter:
+        if c.groupInfo.key == "cpu" and c.nameInfo.key == "usage" and str(c.rollupType) == "average":
+            return c.key
+    raise RuntimeError("找不到 cpu.usage.average 計數器")
+
+
+def _bucket_avg(data: dict, bucket_hours: int) -> dict:
+    """把每個 label 的 [(datetime, value), ...] 依 bucket_hours 對齊邊界後取平均。"""
+    from collections import defaultdict
+
+    def _bucket_key(dt):
+        h = (dt.hour // bucket_hours) * bucket_hours
+        return dt.replace(hour=h, minute=0, second=0, microsecond=0)
+
+    bucketed = {}
+    for lb, rows in data.items():
+        buckets = defaultdict(list)
+        for t, v in rows:
+            buckets[_bucket_key(t)].append(v)
+        bucketed[lb] = {k: sum(vs) / len(vs) for k, vs in buckets.items()}
+    return bucketed
+
+
 # ── Datastore ──────────────────────────────────────────────
 
 def get_datastores() -> list:
     """所有 datastore 用量，按使用率高→低。"""
     from pyVmomi import vim
-    si = _connect()
-    try:
+    with _session() as si:
         result = []
         for ds in _all_objects(si, vim.Datastore):
             s = ds.summary
@@ -68,8 +112,6 @@ def get_datastores() -> list:
                 "used_pct":    round(used / cap * 100, 1) if cap > 0 else 0,
             })
         return sorted(result, key=lambda x: -x["used_pct"])
-    finally:
-        _disconnect(si)
 
 
 # ── Snapshot ───────────────────────────────────────────────
@@ -97,8 +139,7 @@ def get_old_snapshots(days: int = 7) -> list:
     """
     from pyVmomi import vim
     now = datetime.now(tz=timezone.utc)
-    si = _connect()
-    try:
+    with _session() as si:
         result = []
         for vm in _all_objects(si, vim.VirtualMachine):
             if not vm.snapshot:
@@ -116,8 +157,6 @@ def get_old_snapshots(days: int = 7) -> list:
                         "description": snap["description"],
                     })
         return sorted(result, key=lambda x: -x["age_days"])
-    finally:
-        _disconnect(si)
 
 
 # ── 報告 ──────────────────────────────────────────────────
@@ -179,11 +218,8 @@ def _vm_to_dict(vm) -> dict:
 def get_all_vms() -> list:
     """所有 VM 簡明清單。"""
     from pyVmomi import vim
-    si = _connect()
-    try:
+    with _session() as si:
         return [_vm_to_dict(vm) for vm in _all_objects(si, vim.VirtualMachine)]
-    finally:
-        _disconnect(si)
 
 
 def _find_vm(si, query: str):
@@ -205,8 +241,7 @@ def _find_vm(si, query: str):
 def get_vm(name_or_ip: str) -> dict:
     """單一 VM 詳查（disk / snapshot / boot / storage）。"""
     from pyVmomi import vim
-    si = _connect()
-    try:
+    with _session() as si:
         vm = _find_vm(si, name_or_ip)
         if not vm:
             raise ValueError(f"找不到 VM: {name_or_ip}")
@@ -235,8 +270,6 @@ def get_vm(name_or_ip: str) -> dict:
             d["boot_time"]   = vm.runtime.bootTime.astimezone(_TZ8)
             d["uptime_days"] = (datetime.now(tz=timezone.utc) - vm.runtime.bootTime).days
         return d
-    finally:
-        _disconnect(si)
 
 
 def vm_report(name_or_ip: str) -> str:
@@ -369,8 +402,7 @@ def audit_report() -> str:
 def get_hosts() -> list:
     """所有 ESXi host 容量、用量、over-commit。"""
     from pyVmomi import vim
-    si = _connect()
-    try:
+    with _session() as si:
         result = []
         for h in _all_objects(si, vim.HostSystem):
             hw = h.summary.hardware
@@ -404,8 +436,6 @@ def get_hosts() -> list:
                 "mem_overcommit":  round(alloc_mem / mem_total_mb, 2) if mem_total_mb else 0,
             })
         return sorted(result, key=lambda x: x["name"])
-    finally:
-        _disconnect(si)
 
 
 def host_report() -> str:
@@ -432,24 +462,16 @@ def get_cpu_timeseries(targets: list, start: "datetime", interval_id: int = 7200
     """
     from pyVmomi import vim
     now_utc = datetime.now(tz=timezone.utc)
-    si = _connect()
-    try:
+    with _session() as si:
         pm = si.content.perfManager
-        cpu_counter_id = None
-        for c in pm.perfCounter:
-            if c.groupInfo.key == "cpu" and c.nameInfo.key == "usage" and str(c.rollupType) == "average":
-                cpu_counter_id = c.key
-                break
-
-        metric = vim.PerformanceManager.MetricId(counterId=cpu_counter_id, instance="")
+        metric = vim.PerformanceManager.MetricId(counterId=_cpu_counter_id(pm), instance="")
 
         entity_map = {}
         for t in targets:
             if t["type"] == "host":
-                for h in _all_objects(si, vim.HostSystem):
-                    if h.name == t["ip"]:
-                        entity_map[t["label"]] = h
-                        break
+                h = _find_host(si, t["ip"])
+                if h:
+                    entity_map[t["label"]] = h
             else:
                 for vm in _all_objects(si, vim.VirtualMachine):
                     if vm.guest and vm.guest.net:
@@ -480,8 +502,6 @@ def get_cpu_timeseries(targets: list, start: "datetime", interval_id: int = 7200
                 for ts, v in zip(r.sampleInfo, r.value[0].value)
             ]
         return out
-    finally:
-        _disconnect(si)
 
 
 def cpu_timeseries_report(targets: list, start: "datetime", bucket_hours: int = 2) -> str:
@@ -492,21 +512,7 @@ def cpu_timeseries_report(targets: list, start: "datetime", bucket_hours: int = 
     if not data:
         return "無資料"
 
-    # bucket: 把每個 timestamp 對齊到 bucket_hours 的邊界（取 avg）
-    from collections import defaultdict
-    import math
-
-    def _bucket_key(dt: "datetime") -> "datetime":
-        h = (dt.hour // bucket_hours) * bucket_hours
-        return dt.replace(hour=h, minute=0, second=0, microsecond=0)
-
-    bucketed = {}
-    for lb, rows in data.items():
-        buckets: dict = defaultdict(list)
-        for t, v in rows:
-            buckets[_bucket_key(t)].append(v)
-        bucketed[lb] = {k: sum(vs) / len(vs) for k, vs in buckets.items()}
-
+    bucketed = _bucket_avg(data, bucket_hours)
     labels = list(data.keys())
     all_times = sorted({t for rows in bucketed.values() for t in rows})
 
@@ -544,22 +550,11 @@ def get_host_cpu_timeseries(host_ip: str, start: "datetime") -> dict:
     """
     from pyVmomi import vim
     now_utc = datetime.now(tz=timezone.utc)
-    si = _connect()
-    try:
+    with _session() as si:
         pm = si.content.perfManager
-        cpu_counter_id = None
-        for c in pm.perfCounter:
-            if c.groupInfo.key == "cpu" and c.nameInfo.key == "usage" and str(c.rollupType) == "average":
-                cpu_counter_id = c.key
-                break
+        metric = vim.PerformanceManager.MetricId(counterId=_cpu_counter_id(pm), instance="")
 
-        metric = vim.PerformanceManager.MetricId(counterId=cpu_counter_id, instance="")
-
-        target_host = None
-        for h in _all_objects(si, vim.HostSystem):
-            if h.name == host_ip:
-                target_host = h
-                break
+        target_host = _find_host(si, host_ip)
         if not target_host:
             raise ValueError(f"找不到 ESXi host: {host_ip}")
 
@@ -589,8 +584,6 @@ def get_host_cpu_timeseries(host_ip: str, start: "datetime") -> dict:
                 for ts, v in zip(r.sampleInfo, r.value[0].value)
             ]
         return out
-    finally:
-        _disconnect(si)
 
 
 def export_cpu_excel(host_ip: str, start: "datetime", bucket_hours: int = 1, out_path: str = None) -> str:
@@ -600,23 +593,12 @@ def export_cpu_excel(host_ip: str, start: "datetime", bucket_hours: int = 1, out
     """
     import openpyxl
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
-    from collections import defaultdict
 
     data = get_host_cpu_timeseries(host_ip, start)
     if not data:
         raise RuntimeError("無資料")
 
-    def _bucket_key(dt):
-        h = (dt.hour // bucket_hours) * bucket_hours
-        return dt.replace(hour=h, minute=0, second=0, microsecond=0)
-
-    bucketed = {}
-    for lb, rows in data.items():
-        buckets = defaultdict(list)
-        for t, v in rows:
-            buckets[_bucket_key(t)].append(v)
-        bucketed[lb] = {k: sum(vs) / len(vs) for k, vs in buckets.items()}
-
+    bucketed = _bucket_avg(data, bucket_hours)
     all_times = sorted({t for rows in bucketed.values() for t in rows})
     # host first, then VMs sorted by name
     labels = [host_ip] + sorted(k for k in bucketed if k != host_ip)
@@ -696,25 +678,11 @@ def get_cpu_usage(host_ip: str, days: int = 30) -> list:
     else:
         interval_id = 86400
 
-    si = _connect()
-    try:
+    with _session() as si:
         pm = si.content.perfManager
+        metric = vim.PerformanceManager.MetricId(counterId=_cpu_counter_id(pm), instance="")
 
-        cpu_counter_id = None
-        for c in pm.perfCounter:
-            if (c.groupInfo.key == "cpu" and c.nameInfo.key == "usage"
-                    and str(c.rollupType) == "average"):
-                cpu_counter_id = c.key
-                break
-        if cpu_counter_id is None:
-            raise RuntimeError("找不到 cpu.usage.average 計數器")
-
-        # 找目標 host
-        target_host = None
-        for h in _all_objects(si, vim.HostSystem):
-            if h.name == host_ip:
-                target_host = h
-                break
+        target_host = _find_host(si, host_ip)
         if not target_host:
             raise ValueError(f"找不到 ESXi host: {host_ip}")
 
@@ -722,7 +690,6 @@ def get_cpu_usage(host_ip: str, days: int = 30) -> list:
         if not vms:
             return []
 
-        metric = vim.PerformanceManager.MetricId(counterId=cpu_counter_id, instance="")
         queries = [
             vim.PerformanceManager.QuerySpec(
                 entity=vm,
@@ -756,8 +723,6 @@ def get_cpu_usage(host_ip: str, days: int = 30) -> list:
             })
 
         return sorted(result, key=lambda x: -x["avg_pct"])
-    finally:
-        _disconnect(si)
 
 
 def cpu_report(host_ip: str, days: int = 30) -> str:
@@ -780,8 +745,7 @@ def cpu_report(host_ip: str, days: int = 30) -> str:
 def get_active_alarms() -> list:
     """所有觸發中（紅 / 黃）的 alarm。"""
     from pyVmomi import vim
-    si = _connect()
-    try:
+    with _session() as si:
         result = []
         for cls in [vim.ClusterComputeResource, vim.HostSystem,
                     vim.VirtualMachine, vim.Datastore]:
@@ -803,8 +767,6 @@ def get_active_alarms() -> list:
                     })
         return sorted(result, key=lambda x: (x["severity"] != "red",
                                               x["time"] or datetime.min.replace(tzinfo=_TZ8)))
-    finally:
-        _disconnect(si)
 
 
 def alarm_report() -> str:
@@ -837,8 +799,7 @@ _KEY_EVENT_TYPES = [
 def get_recent_events(hours: int = 24, types: list = None) -> list:
     """過去 N 小時的關鍵事件。"""
     from pyVmomi import vim
-    si = _connect()
-    try:
+    with _session() as si:
         content = si.RetrieveContent()
         spec = vim.event.EventFilterSpec()
         spec.eventTypeId = types or _KEY_EVENT_TYPES
@@ -857,8 +818,6 @@ def get_recent_events(hours: int = 24, types: list = None) -> list:
                 "message": (e.fullFormattedMessage or "")[:200],
             })
         return result
-    finally:
-        _disconnect(si)
 
 
 def events_report(hours: int = 24) -> str:
@@ -894,8 +853,7 @@ def events_report(hours: int = 24) -> str:
 def get_datastore_vms(name: str) -> dict:
     """指定 datastore 上的 VM 清單與用量。"""
     from pyVmomi import vim
-    si = _connect()
-    try:
+    with _session() as si:
         target = None
         for ds in _all_objects(si, vim.Datastore):
             if ds.name == name:
@@ -929,8 +887,6 @@ def get_datastore_vms(name: str) -> dict:
             })
         info["vms"].sort(key=lambda x: -x["committed_gb"])
         return info
-    finally:
-        _disconnect(si)
 
 
 def datastore_detail_report(name: str, top: int = 30) -> str:
@@ -952,8 +908,7 @@ def datastore_detail_report(name: str, top: int = 30) -> str:
 def get_vmfs_uuids() -> list:
     """所有已掛載 VMFS datastore 的 UUID。"""
     from pyVmomi import vim
-    si = _connect()
-    try:
+    with _session() as si:
         result = []
         for ds in _all_objects(si, vim.Datastore):
             info = ds.info
@@ -966,8 +921,6 @@ def get_vmfs_uuids() -> list:
                 "hosts": hosts,
             })
         return sorted(result, key=lambda x: x["name"])
-    finally:
-        _disconnect(si)
 
 
 def vmfs_uuid_report() -> str:
