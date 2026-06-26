@@ -15,8 +15,8 @@ from tools.secrets import get as _secret
 
 AD_SERVER = os.getenv("AD_SERVER", "10.11.1.121")
 AD_DOMAIN = os.getenv("AD_DOMAIN", "uti.com")
-AD_USER   = os.getenv("SMTP_USER", os.getenv("AD_USER", ""))
-AD_PASS   = _secret("SMTP_PASS") or _secret("AD_PASS")
+AD_USER   = os.getenv("AD_USER", "infra.ro")
+AD_PASS   = _secret("AD_PASS")
 AD_PORT   = int(os.getenv("AD_PORT", "636"))         # 636 = LDAPS
 AD_USE_SSL = os.getenv("AD_USE_SSL", "true").lower() != "false"
 BASE_DN   = "DC=" + ",DC=".join(AD_DOMAIN.upper().split("."))

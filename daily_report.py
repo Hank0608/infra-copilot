@@ -51,11 +51,10 @@ def _collect() -> dict:
         result["errors"].append(f"AD Security: {e}")
 
     try:
-        t           = ppdm.login()
-        storage     = ppdm.get_storage(t)
-        ppdm_alerts = ppdm.get_alerts(t, severity="CRITICAL", limit=10)
-        core_run    = ppdm.get_policy_run(t, "Core Service")
-        ppdm.logout(t)
+        with ppdm._token() as t:
+            storage     = ppdm.get_storage(t)
+            ppdm_alerts = ppdm.get_alerts(t, severity="CRITICAL", limit=10)
+            core_run    = ppdm.get_policy_run(t, "Core Service")
         result["ppdm"] = {
             "core_run": core_run,
             "storage":  storage,
@@ -65,10 +64,9 @@ def _collect() -> dict:
         result["errors"].append(f"PPDM: {e}")
 
     try:
-        sid      = syno.login()
-        backups  = syno.get_backup_status(sid)
-        cameras  = syno.get_cameras(sid)
-        syno.logout(sid)
+        with syno._session() as sid:
+            backups = syno.get_backup_status(sid)
+            cameras = syno.get_cameras(sid)
         now8     = __import__("datetime").datetime.now(tz=syno._TZ8)
         cutoff30 = now8 - __import__("datetime").timedelta(days=30)
         result["synology"] = {
@@ -493,10 +491,15 @@ if __name__ == "__main__":
         ok = send_to_teams(url)
         print("✅ 已發送到 Teams" if ok else "❌ Teams 發送失敗")
     elif "--file" in sys.argv:
-        outdir = sys.argv[sys.argv.index("--file") + 1] if sys.argv.index("--file") + 1 < len(sys.argv) else "."
-        Path(outdir).mkdir(parents=True, exist_ok=True)
+        arg = sys.argv[sys.argv.index("--file") + 1] if sys.argv.index("--file") + 1 < len(sys.argv) else "."
+        p   = Path(arg).expanduser()
+        if p.suffix:          # 有副檔名 → 當完整路徑
+            out = p
+            out.parent.mkdir(parents=True, exist_ok=True)
+        else:                 # 無副檔名 → 當目錄，自動加日期檔名
+            p.mkdir(parents=True, exist_ok=True)
+            out = p / f"{TODAY}.md"
         content = run(full=True)
-        out = Path(outdir) / f"{TODAY}.txt"
         out.write_text(content)
         print(content)
         print(f"\n已存至 {out}")
