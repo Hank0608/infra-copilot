@@ -100,11 +100,12 @@ def _fetch_max_pwd_days(conn) -> int:
 def get_user(username: str) -> dict:
     """查詢單一使用者詳細資訊。"""
     from ldap3 import SUBTREE
+    from ldap3.utils.conv import escape_filter_chars
     with _connection() as conn:
         _fetch_max_pwd_days(conn)
         conn.search(
             BASE_DN,
-            f"(&(objectClass=user)(objectCategory=person)(sAMAccountName={username}))",
+            f"(&(objectClass=user)(objectCategory=person)(sAMAccountName={escape_filter_chars(username)}))",
             search_scope=SUBTREE,
             attributes=[
                 "sAMAccountName", "displayName", "department", "title",
@@ -141,11 +142,13 @@ def get_user(username: str) -> dict:
 def search_users(keyword: str, max_results: int = 20) -> list:
     """依姓名或部門關鍵字搜尋使用者（回傳摘要）。"""
     from ldap3 import SUBTREE
+    from ldap3.utils.conv import escape_filter_chars
     with _connection() as conn:
         _fetch_max_pwd_days(conn)
+        kw = escape_filter_chars(keyword)
         filt = (
             f"(&(objectClass=user)(objectCategory=person)"
-            f"(|(displayName=*{keyword}*)(department=*{keyword}*)(sAMAccountName=*{keyword}*)))"
+            f"(|(displayName=*{kw}*)(department=*{kw}*)(sAMAccountName=*{kw}*)))"
         )
         conn.search(
             BASE_DN, filt, search_scope=SUBTREE,
@@ -205,11 +208,12 @@ def get_expiring_passwords(days: int = 14) -> list:
 def get_group_members(group_name: str) -> list:
     """列出群組成員（僅直接成員，不含巢狀）。"""
     from ldap3 import SUBTREE
+    from ldap3.utils.conv import escape_filter_chars
     with _connection() as conn:
         # 先找群組 DN
         conn.search(
             BASE_DN,
-            f"(&(objectClass=group)(cn={group_name}))",
+            f"(&(objectClass=group)(cn={escape_filter_chars(group_name)}))",
             attributes=["member"],
         )
         if not conn.entries:
@@ -236,11 +240,12 @@ def get_group_members(group_name: str) -> list:
 def get_department_users(department: str) -> list:
     """列出某部門所有啟用帳號。"""
     from ldap3 import SUBTREE
+    from ldap3.utils.conv import escape_filter_chars
     with _connection() as conn:
         _fetch_max_pwd_days(conn)
         conn.search(
             BASE_DN,
-            f"(&(objectClass=user)(objectCategory=person)(department=*{department}*))",
+            f"(&(objectClass=user)(objectCategory=person)(department=*{escape_filter_chars(department)}*))",
             search_scope=SUBTREE,
             attributes=["sAMAccountName", "displayName", "department", "title",
                         "manager", "mail", "pwdLastSet", "userAccountControl"],

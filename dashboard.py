@@ -1,6 +1,7 @@
 """Server-centric monitoring dashboard — Zabbix + Wazuh + AD + Backup aggregated view."""
 
 import datetime
+import os
 import threading
 from pathlib import Path
 
@@ -32,6 +33,7 @@ _state: dict = {
     "network_loading": False,
     "network_updated": None,
     "error":           None,
+    "fetch_errors":    {},   # {source: error_msg}，資料源失敗時記錄
 }
 _lock = threading.Lock()
 
@@ -59,33 +61,39 @@ def _collect(hours: int = 24):
 
     try:
         servers = _load_focus()
+        _errs: dict = {}
 
         # ── AD LDAP ───────────────────────────────────
         try:
             locked = ad.get_locked_accounts()
-        except Exception:
+        except Exception as e:
             locked = []
+            _errs["ad_locked"] = str(e)
 
         try:
             expiring = ad.get_expiring_passwords(days=14)
-        except Exception:
+        except Exception as e:
             expiring = []
+            _errs["ad_expiring"] = str(e)
 
         try:
             changes = ad.get_recent_account_changes(days=7)
-        except Exception:
+        except Exception as e:
             changes = {"created": [], "disabled": []}
+            _errs["ad_changes"] = str(e)
 
         # ── AD 事件 via Wazuh ─────────────────────────
         try:
             lockout_events = wz.get_dc_lockouts(hours=24)
-        except Exception:
+        except Exception as e:
             lockout_events = []
+            _errs["wazuh_lockouts"] = str(e)
 
         try:
             logon_summary = wz.get_dc_logon_failure_summary(hours=24)
-        except Exception:
+        except Exception as e:
             logon_summary = {"total": 0, "by_user": [], "by_status": {}}
+            _errs["wazuh_logon"] = str(e)
 
         # ── Zabbix ───────────────────────────────────
         zb_data: dict = {"by_name": {}, "by_ip": {}}
@@ -95,15 +103,16 @@ def _collect(hours: int = 24):
                 zb_data = zb.get_all_host_data(token)
             finally:
                 zb.logout(token)
-        except Exception:
-            pass
+        except Exception as e:
+            _errs["zabbix"] = str(e)
 
         # ── Wazuh ────────────────────────────────────
         agent_names = [s["wazuh"] for s in servers if s.get("wazuh")]
         try:
             wz_issues = wz.get_agent_issues(agent_names, hours=hours)
-        except Exception:
+        except Exception as e:
             wz_issues = {}
+            _errs["wazuh_issues"] = str(e)
 
         # ── PPDM / Synology 由 _collect_backup() 獨立更新，此處略過 ──
 
@@ -189,15 +198,16 @@ def _collect(hours: int = 24):
         results.sort(key=lambda c: (order.get(c["status"], 9), c["team"], c["label"]))
 
         with _lock:
-            _state["servers"]   = results
-            _state["hours"]     = hours
-            _state["ad_global"] = {
+            _state["servers"]      = results
+            _state["hours"]        = hours
+            _state["ad_global"]    = {
                 "locked_total":   len(active_locked),
                 "expiring_total": len(expiring),
                 "overdue_total":  len(overdue),
             }
-            _state["updated"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            _state["loading"] = False
+            _state["fetch_errors"] = _errs
+            _state["updated"]      = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            _state["loading"]      = False
 
     except Exception as e:
         with _lock:
@@ -216,8 +226,10 @@ def _collect_backup():
         ppdm_card = None
         try:
             ppdm_card = ppdm.get_dashboard_card(hours=24)
-        except Exception:
-            pass
+        except Exception as e:
+            ppdm_card = {"status": "error", "error": str(e),
+                         "summary": {}, "failed_jobs": [], "warn_jobs": [],
+                         "storage": [], "crit_alerts": [], "warn_alerts": [], "hours": 24}
 
         syn_cards = []
         for nas in syn.get_nas_list():
@@ -576,4 +588,6 @@ def refresh_network():
 
 if __name__ == "__main__":
     threading.Thread(target=_collect, daemon=True).start()
-    app.run(host="0.0.0.0", port=5050, debug=False)
+    host = os.getenv("DASHBOARD_HOST", "127.0.0.1")
+    port = int(os.getenv("DASHBOARD_PORT", "5050"))
+    app.run(host=host, port=port, debug=False)
